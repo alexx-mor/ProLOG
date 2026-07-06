@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/
+dist/
+backups/
+config.json
+data/*.sqlite3
+data/*.log
+exports/*.xlsx
+private/
+/*.xlsx
