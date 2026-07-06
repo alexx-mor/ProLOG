@@ -695,3 +695,28 @@
 - Verified executable version information after rebuild.
 - Executable startup smoke test passed: process stayed alive for 5 seconds and was then stopped manually.
 
+## 2026-07-07 - GitHub project tracking
+
+### Added
+
+- Installed and enabled Git for Windows for ProLOG development workflow.
+- Initialized local Git repository on branch `main`.
+- Connected repository to GitHub remote:
+  - `https://github.com/alexx-mor/ProLOG.git`.
+- Created MVP baseline commit before legacy Excel import work:
+  - `749de31 checkpoint: MVP baseline before legacy import`.
+- Created and pushed MVP checkpoint tag:
+  - `mvp-checkpoint-2026-07-07`.
+- Pushed current `main` branch to GitHub.
+
+### Notes
+
+- Runtime and confidential files are intentionally excluded from GitHub:
+  - `private/`;
+  - `config.json`;
+  - `data/`;
+  - `dist/`;
+  - `build/`;
+  - `backups/`;
+  - root Excel files.
+
