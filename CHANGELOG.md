@@ -11,12 +11,15 @@
 - Added duplicate-file protection by SHA-256 hash for completed legacy imports.
 - Added `File - Импорт старых отчетов Excel` menu action, available only after the initial setup wizard is complete.
 - Added help text for legacy report import.
+- Added interactive row resolution in the legacy import preview: users can fix employee mapping, object, location, work type, description and hours directly in the import window.
+- Added suggested resolution hints for common legacy import discrepancies, including missing employees, empty descriptions, invalid hours and empty objects.
 
 ### Changed
 
 - Legacy absences are normalized into current ProLOG locations: vacation, unpaid leave, sick leave, study leave and absence.
 - Legacy `выходной` rows are skipped and shown in the import audit instead of becoming work log entries.
 - Legacy work rows are imported as `WorkLogEntry` records through the business service layer, preserving old sheet, row, position and location in comments.
+- Legacy import validation is recalculated after manual corrections before allowing commit.
 
 ### Built
 
@@ -31,6 +34,7 @@
 - Normalization smoke test passed for old absence spellings and employee-initial matching.
 - Legacy Excel parser smoke test passed on `Отчеты Июнь 2026 АСУТП.xlsx`: 900 rows, 5764 hours, period 2026-06-01 to 2026-06-30.
 - Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+- Interactive legacy import correction UI was included in the rebuilt executable and passed Python syntax check.
 
 ## 2026-07-03 - MVP foundation
 

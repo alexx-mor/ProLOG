@@ -7,16 +7,21 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QDialog,
     QHeaderView,
@@ -24,6 +29,9 @@ from PySide6.QtWidgets import (
 
 from legacy_import.models import ImportRowStatus, IssueSeverity, LegacyImportPreview, ResolvedLegacyRow
 from legacy_import.service import LegacyExcelImportService
+from models import DirectoryItem, Employee
+
+ROW_ROLE = Qt.ItemDataRole.UserRole
 
 
 class LegacyImportDialog(QDialog):
@@ -47,8 +55,10 @@ class LegacyImportDialog(QDialog):
         self.file_path.setPlaceholderText("Файл Excel не выбран")
         self.browse_button = QPushButton("Выбрать файл")
         self.analyze_button = QPushButton("Проверить")
+        self.edit_button = QPushButton("Исправить строку")
         self.import_button = QPushButton("Импортировать")
         self.close_button = QPushButton("Закрыть")
+        self.edit_button.setEnabled(False)
         self.import_button.setEnabled(False)
         self.summary = QLabel("Готово к проверке")
         self.summary.setObjectName("WizardSubtitle")
@@ -75,6 +85,7 @@ class LegacyImportDialog(QDialog):
         self.tabs.addTab(self.rows_table, "Строки импорта")
 
         buttons = QHBoxLayout()
+        buttons.addWidget(self.edit_button)
         buttons.addStretch()
         buttons.addWidget(self.import_button)
         buttons.addWidget(self.close_button)
@@ -92,8 +103,12 @@ class LegacyImportDialog(QDialog):
     def _connect(self) -> None:
         self.browse_button.clicked.connect(self._select_file)
         self.analyze_button.clicked.connect(self._analyze)
+        self.edit_button.clicked.connect(self._edit_selected_row)
         self.import_button.clicked.connect(self._commit)
         self.close_button.clicked.connect(self.reject)
+        self.rows_table.doubleClicked.connect(self._edit_selected_row)
+        self.issues_table.doubleClicked.connect(self._edit_issue_row)
+        self.rows_table.itemSelectionChanged.connect(self._update_actions)
 
     def _configure_tables(self) -> None:
         self.issues_table.setHorizontalHeaderLabels(
@@ -125,6 +140,7 @@ class LegacyImportDialog(QDialog):
         file_name, _ = QFileDialog.getOpenFileName(self, "Импорт старых отчетов", "", "Excel (*.xlsx)")
         if file_name:
             self.file_path.setText(file_name)
+            self.edit_button.setEnabled(False)
             self.import_button.setEnabled(False)
             self.summary.setText("Файл выбран. Нажмите «Проверить».")
 
@@ -136,11 +152,12 @@ class LegacyImportDialog(QDialog):
             self.preview = self.import_service.analyze(Path(self.file_path.text().strip()))
         except Exception as exc:
             self.preview = None
+            self.edit_button.setEnabled(False)
             self.import_button.setEnabled(False)
             self._message(str(exc), QMessageBox.Icon.Warning)
             return
         self._fill_preview(self.preview)
-        self.import_button.setEnabled(not self.preview.has_blocking_errors and self.preview.importable_count > 0)
+        self._update_actions()
         if self.preview.has_blocking_errors:
             self.tabs.setCurrentWidget(self.issues_table)
 
@@ -183,6 +200,7 @@ class LegacyImportDialog(QDialog):
         )
         self._fill_issues(preview)
         self._fill_rows(preview.rows)
+        self._update_actions()
 
     def _fill_issues(self, preview: LegacyImportPreview) -> None:
         self.issues_table.setRowCount(len(preview.issues))
@@ -198,6 +216,7 @@ class LegacyImportDialog(QDialog):
             ]
             for column, value in enumerate(values):
                 item = _table_item(value)
+                item.setData(ROW_ROLE, self._row_index_for_issue(issue))
                 if column == 0:
                     item.setIcon(_severity_icon(issue.severity))
                 item.setBackground(_issue_background(issue.severity))
@@ -222,6 +241,7 @@ class LegacyImportDialog(QDialog):
             background = _row_background(row)
             for column, value in enumerate(values):
                 item = _table_item(value)
+                item.setData(ROW_ROLE, row_index)
                 if column == 0:
                     item.setIcon(_row_icon(row.status))
                 item.setBackground(background)
@@ -235,6 +255,68 @@ class LegacyImportDialog(QDialog):
         row_widths = [140, 120, 65, 90, 155, 210, 190, 180, 65]
         for column, width in enumerate(row_widths):
             self.rows_table.setColumnWidth(column, width)
+
+    def _edit_selected_row(self) -> None:
+        row = self._current_row()
+        if self.preview is None or row is None:
+            self._message("Выберите строку импорта", QMessageBox.Icon.Information)
+            return
+        dialog = LegacyRowResolutionDialog(
+            row=row,
+            employees=self.import_service.employees.list(),
+            locations=self.import_service.directories.list_all("locations"),
+            objects=self.import_service.directories.list_all("objects"),
+            work_types=self.import_service.directories.list_all("work_types"),
+            parent=self,
+        )
+        if not dialog.exec():
+            return
+        dialog.apply_to(row)
+        self.import_service.refresh_preview(self.preview)
+        self._fill_preview(self.preview)
+        self.tabs.setCurrentWidget(self.rows_table)
+
+    def _edit_issue_row(self) -> None:
+        index = self._row_index_from_table(self.issues_table)
+        if index is None or self.preview is None:
+            return
+        self.tabs.setCurrentWidget(self.rows_table)
+        self.rows_table.selectRow(index)
+        self._edit_selected_row()
+
+    def _current_row(self) -> ResolvedLegacyRow | None:
+        if self.preview is None:
+            return None
+        index = self._row_index_from_table(self.rows_table)
+        if index is None:
+            return None
+        return self.preview.rows[index] if 0 <= index < len(self.preview.rows) else None
+
+    def _row_index_from_table(self, table: QTableWidget) -> int | None:
+        item = table.item(table.currentRow(), 0)
+        if item is None:
+            return None
+        value = item.data(ROW_ROLE)
+        return int(value) if value is not None and int(value) >= 0 else None
+
+    def _row_index_for_issue(self, issue) -> int:
+        if self.preview is None or issue.row_number is None:
+            return -1
+        for index, row in enumerate(self.preview.rows):
+            if (
+                row.source.sheet_name == issue.sheet_name
+                and row.source.row_number == issue.row_number
+                and row.source.work_date == issue.work_date
+            ):
+                return index
+        return -1
+
+    def _update_actions(self) -> None:
+        has_preview = self.preview is not None
+        self.edit_button.setEnabled(has_preview and self._current_row() is not None)
+        self.import_button.setEnabled(
+            bool(has_preview and self.preview and not self.preview.has_blocking_errors and self.preview.importable_count > 0)
+        )
 
     def _ask(self, title: str, message: str) -> bool:
         box = QMessageBox(self)
@@ -253,6 +335,227 @@ class LegacyImportDialog(QDialog):
         box.setIcon(icon)
         box.addButton("ОК", QMessageBox.ButtonRole.AcceptRole)
         box.exec()
+
+
+class LegacyRowResolutionDialog(QDialog):
+    def __init__(
+        self,
+        row: ResolvedLegacyRow,
+        employees: list[Employee],
+        locations: list[DirectoryItem],
+        objects: list[DirectoryItem],
+        work_types: list[DirectoryItem],
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Решение разночтения")
+        self.resize(820, 620)
+        self.row = row
+        self.employees = sorted(employees, key=lambda item: item.full_name.casefold())
+
+        self.title = QLabel("Исправление строки импорта")
+        self.title.setObjectName("DialogTitle")
+        self.source = QLabel(_source_text(row))
+        self.source.setWordWrap(True)
+        self.source.setObjectName("WizardSubtitle")
+        self.suggestion = QLabel(_suggestion_text(row, self.employees))
+        self.suggestion.setWordWrap(True)
+
+        self.status = QComboBox()
+        self.status.addItem("Импортировать", ImportRowStatus.READY.value)
+        self.status.addItem("Пропустить", ImportRowStatus.SKIPPED.value)
+        self.employee = QComboBox()
+        self.location = QComboBox()
+        self.object = QComboBox()
+        self.work_type = QComboBox()
+        self.hours = QSpinBox()
+        self.description = QTextEdit()
+        self.comment = QTextEdit()
+        self.skip_reason = QLineEdit(row.skip_reason)
+        self.suggest_employee_button = QPushButton("Выбрать предложенного сотрудника")
+        self.save_button = QPushButton("Применить")
+        self.cancel_button = QPushButton("Отмена")
+
+        self._employee_candidate = _employee_candidate(row, self.employees)
+        self._configure_fields(locations, objects, work_types)
+        self._build_layout()
+        self._connect()
+        self._sync_status_fields()
+
+    def apply_to(self, row: ResolvedLegacyRow) -> None:
+        status = str(self.status.currentData() or ImportRowStatus.READY.value)
+        row.status = ImportRowStatus.SKIPPED if status == ImportRowStatus.SKIPPED.value else ImportRowStatus.READY
+        row.employee = self.employee.currentData()
+        row.current_location = self.location.currentText().strip()
+        row.object_name = self.object.currentText().strip()
+        row.work_type = self.work_type.currentText().strip()
+        row.hours = int(self.hours.value())
+        row.description = self.description.toPlainText().strip()
+        row.comment = self.comment.toPlainText().strip()
+        row.skip_reason = self.skip_reason.text().strip()
+        row.issues = []
+
+    def _configure_fields(
+        self,
+        locations: list[DirectoryItem],
+        objects: list[DirectoryItem],
+        work_types: list[DirectoryItem],
+    ) -> None:
+        self.status.setCurrentIndex(1 if self.row.status == ImportRowStatus.SKIPPED else 0)
+        self._fill_employee_combo()
+        self._fill_directory_combo(self.location, locations, self.row.current_location, editable=False)
+        self._fill_directory_combo(self.object, objects, self.row.object_name, editable=True)
+        self._fill_directory_combo(self.work_type, work_types, self.row.work_type, editable=True)
+        self.hours.setRange(0, 24)
+        self.hours.setValue(max(0, min(24, int(self.row.hours))))
+        self.description.setPlainText(self.row.description or self.row.source.description)
+        self.description.setMinimumHeight(110)
+        self.comment.setPlainText(self.row.comment)
+        self.comment.setMinimumHeight(70)
+        self.suggest_employee_button.setEnabled(self._employee_candidate is not None)
+
+    def _fill_employee_combo(self) -> None:
+        self.employee.setView(QListView())
+        self.employee.addItem("", None)
+        for employee in self.employees:
+            self.employee.addItem(employee.full_name, employee)
+        current_id = self.row.employee.id if self.row.employee else None
+        if current_id is None and self._employee_candidate is not None:
+            current_id = self._employee_candidate.id
+        for index in range(self.employee.count()):
+            employee = self.employee.itemData(index)
+            if employee is not None and employee.id == current_id:
+                self.employee.setCurrentIndex(index)
+                return
+
+    def _fill_directory_combo(
+        self,
+        combo: QComboBox,
+        items: list[DirectoryItem],
+        current: str,
+        editable: bool,
+    ) -> None:
+        combo.setView(QListView())
+        combo.setEditable(editable)
+        combo.addItem("")
+        values = [item.name for item in sorted(items, key=lambda item: item.name.casefold())]
+        for value in values:
+            combo.addItem(value)
+        if current and current not in values:
+            combo.addItem(current)
+        if current:
+            index = combo.findText(current)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+
+    def _build_layout(self) -> None:
+        source_frame = QFrame()
+        source_frame.setObjectName("EmployeeContext")
+        source_layout = QVBoxLayout(source_frame)
+        source_layout.setContentsMargins(12, 10, 12, 10)
+        source_layout.addWidget(self.source)
+        source_layout.addWidget(self.suggestion)
+        source_layout.addWidget(self.suggest_employee_button, 0, Qt.AlignmentFlag.AlignLeft)
+
+        form = QFormLayout()
+        form.addRow("Действие", self.status)
+        form.addRow("Сотрудник ProLOG", self.employee)
+        form.addRow("Местонахождение", self.location)
+        form.addRow("Объект", self.object)
+        form.addRow("Вид работ", self.work_type)
+        form.addRow("Часы", self.hours)
+        form.addRow("Описание работ", self.description)
+        form.addRow("Комментарий", self.comment)
+        form.addRow("Причина пропуска", self.skip_reason)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self.save_button)
+        buttons.addWidget(self.cancel_button)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+        layout.addWidget(self.title)
+        layout.addWidget(source_frame)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+
+    def _connect(self) -> None:
+        self.status.currentIndexChanged.connect(self._sync_status_fields)
+        self.suggest_employee_button.clicked.connect(self._select_suggested_employee)
+        self.save_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+
+    def _sync_status_fields(self) -> None:
+        is_skipped = self.status.currentData() == ImportRowStatus.SKIPPED.value
+        for widget in (
+            self.employee,
+            self.location,
+            self.object,
+            self.work_type,
+            self.hours,
+            self.description,
+            self.comment,
+        ):
+            widget.setEnabled(not is_skipped)
+        self.skip_reason.setEnabled(is_skipped)
+        if is_skipped and not self.skip_reason.text().strip():
+            self.skip_reason.setText("Пропущено пользователем при сверке импорта")
+
+    def _select_suggested_employee(self) -> None:
+        if self._employee_candidate is None:
+            return
+        for index in range(self.employee.count()):
+            employee = self.employee.itemData(index)
+            if employee is not None and employee.id == self._employee_candidate.id:
+                self.employee.setCurrentIndex(index)
+                return
+
+
+def _source_text(row: ResolvedLegacyRow) -> str:
+    values = [
+        f"Лист: {row.source.sheet_name}, строка: {row.source.row_number}, дата: {row.source.work_date:%d.%m.%Y}",
+        f"Сотрудник в Excel: {row.source.employee_text or 'не указан'}",
+        f"Должность в Excel: {row.source.position_text or 'не указана'}",
+        f"Объект в Excel: {row.source.object_text or 'не указан'}",
+        f"Нахождение в Excel: {row.source.legacy_location_text or 'не указано'}",
+        f"Часы в Excel: {row.source.hours}",
+        f"Описание в Excel: {row.source.description or 'не заполнено'}",
+    ]
+    return "\n".join(values)
+
+
+def _suggestion_text(row: ResolvedLegacyRow, employees: list[Employee]) -> str:
+    suggestions: list[str] = []
+    employee = _employee_candidate(row, employees)
+    if employee is not None and row.employee is None:
+        suggestions.append(f"Предложение: сопоставить строку с сотрудником «{employee.full_name}».")
+    if any(issue.code in {"EMPLOYEE_NOT_FOUND", "EMPLOYEE_NOT_SELECTED"} for issue in row.issues):
+        suggestions.append("Решение: выберите сотрудника ProLOG вручную или пропустите строку.")
+    if any(issue.code == "EMPTY_DESCRIPTION_WITH_HOURS" for issue in row.issues):
+        suggestions.append("Решение: заполните описание работ либо переведите строку в пропущенные.")
+    if any(issue.code in {"HOURS_TOO_HIGH", "ZERO_HOURS", "NEGATIVE_HOURS"} for issue in row.issues):
+        suggestions.append("Решение: исправьте часы в диапазоне от 0 до 24.")
+    if any(issue.code == "EMPTY_OBJECT" for issue in row.issues):
+        suggestions.append("Решение: выберите объект, впишите новый объект или оставьте пустым осознанно.")
+    if row.status == ImportRowStatus.SKIPPED:
+        suggestions.append("Строка сейчас пропускается. Можно переключить действие на импорт.")
+    if not suggestions:
+        suggestions.append("Строку можно уточнить вручную перед импортом.")
+    return "\n".join(suggestions)
+
+
+def _employee_candidate(row: ResolvedLegacyRow, employees: list[Employee]) -> Employee | None:
+    surname = _surname(row.source.employee_text)
+    if not surname:
+        return None
+    matches = [employee for employee in employees if _surname(employee.full_name) == surname]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _surname(value: str) -> str:
+    text = value.replace(".", " ").replace(",", " ").strip().casefold()
+    return text.split()[0] if text.split() else ""
 
 
 def _table_item(value: object) -> QTableWidgetItem:

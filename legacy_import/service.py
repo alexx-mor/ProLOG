@@ -28,7 +28,7 @@ from legacy_import.normalizers import (
 )
 from legacy_import.repository import LegacyImportAuditRepository
 from models import Employee, WorkLogEntry
-from services import DirectoryService, EmployeeService, WorkLogService
+from services import DirectoryService, EmployeeService, NON_WORK_LOCATIONS, WorkLogService
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,7 @@ class LegacyExcelImportService:
         )
 
     def commit(self, preview: LegacyImportPreview) -> ImportCommitResult:
+        self.refresh_preview(preview)
         if preview.duplicate_batch_id is not None:
             raise ValueError("Файл уже импортировался ранее")
         if preview.has_blocking_errors:
@@ -128,6 +129,83 @@ class LegacyExcelImportService:
             skipped_count=skipped_count,
             error_count=preview.error_count,
         )
+
+    def refresh_preview(self, preview: LegacyImportPreview) -> None:
+        issues = [
+            issue
+            for issue in preview.issues
+            if issue.code in {"DUPLICATE_FILE", "NO_ROWS", "HEADER_NOT_FOUND"}
+        ]
+        for row in preview.rows:
+            self.validate_resolved_row(row)
+            issues.extend(row.issues)
+        preview.issues = issues
+
+    def validate_resolved_row(self, row: ResolvedLegacyRow) -> None:
+        row.issues = []
+        if row.status == ImportRowStatus.SKIPPED:
+            if not row.skip_reason:
+                row.skip_reason = "Строка пропущена пользователем"
+            return
+        if row.status != ImportRowStatus.READY:
+            row.status = ImportRowStatus.READY
+
+        if row.employee is None:
+            row.status = ImportRowStatus.ERROR
+            row.issues.append(
+                _issue(
+                    row.source,
+                    IssueSeverity.ERROR,
+                    "EMPLOYEE_NOT_SELECTED",
+                    "Выберите сотрудника ProLOG для импорта строки",
+                )
+            )
+            return
+
+        if row.hours < 0:
+            row.status = ImportRowStatus.ERROR
+            row.issues.append(_issue(row.source, IssueSeverity.ERROR, "NEGATIVE_HOURS", "Часы не могут быть отрицательными"))
+        if row.hours > MAX_IMPORT_HOURS:
+            row.status = ImportRowStatus.ERROR
+            row.issues.append(
+                _issue(
+                    row.source,
+                    IssueSeverity.ERROR,
+                    "HOURS_TOO_HIGH",
+                    "За один день можно указать не более 24 часов",
+                )
+            )
+        if row.hours == 0 and row.current_location not in NON_WORK_LOCATIONS:
+            row.status = ImportRowStatus.ERROR
+            row.issues.append(
+                _issue(
+                    row.source,
+                    IssueSeverity.ERROR,
+                    "ZERO_HOURS",
+                    "Для рабочей строки укажите часы больше нуля или переведите строку в пропущенные",
+                )
+            )
+        if row.hours > 0 and not row.description.strip():
+            row.status = ImportRowStatus.ERROR
+            row.issues.append(
+                _issue(
+                    row.source,
+                    IssueSeverity.ERROR,
+                    "EMPTY_DESCRIPTION_WITH_HOURS",
+                    "Есть часы, но не заполнено описание работ",
+                )
+            )
+        if row.status != ImportRowStatus.ERROR:
+            row.status = ImportRowStatus.READY
+        if row.status == ImportRowStatus.READY and row.hours > 0 and not row.object_name.strip():
+            row.issues.append(
+                _issue(
+                    row.source,
+                    IssueSeverity.WARNING,
+                    "EMPTY_OBJECT",
+                    "Есть часы, но не указан объект; запись будет импортирована без объекта",
+                )
+            )
 
     def _resolve_row(
         self,
