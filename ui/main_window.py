@@ -14,12 +14,14 @@ from config import ConfigManager
 from constants import APP_ICON_FILE, APP_NAME
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from directory_files import normalize_department_name
+from legacy_import.service import LegacyExcelImportService
 from requisites import load_requisites_options
 from services import AnalyticsService, DirectoryService, EmployeeService, WorkLogService
 from update_checker import UpdateChecker
 from ui.dialogs import AboutDialog, DirectoryDialog, EmployeeDialog, HelpDialog, OrganizationDialog, UpdateStatusDialog
 from ui.analytics_widget import AnalyticsWidget
 from ui.employee_widget import EmployeeWidget
+from ui.legacy_import_dialog import LegacyImportDialog
 from ui.report_viewer_widget import ReportViewerWidget
 from ui.setup_wizard import InitialSetupDialog
 from ui.style import APP_STYLESHEET
@@ -39,6 +41,7 @@ class MainWindow(QMainWindow):
         self.employees = EmployeeService(EmployeeRepository(database), self.directories)
         self.worklogs = WorkLogService(WorkLogRepository(database), self.directories)
         self.analytics = AnalyticsService(self.worklogs, self.employees, self.directories)
+        self.legacy_importer = LegacyExcelImportService(database, self.employees, self.directories, self.worklogs)
         self.config_manager = ConfigManager()
         self.config = self.config_manager.load()
         self.requisites_options = load_requisites_options()
@@ -66,11 +69,13 @@ class MainWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("Файл")
         self.organization_action = QAction("Авторизация", self)
         self.import_action = QAction("Импорт сотрудников", self)
+        self.import_legacy_reports_action = QAction("Импорт старых отчетов Excel", self)
         self.export_employees_action = QAction("Экспорт сотрудников", self)
         self.exit_action = QAction("Выход", self)
         file_menu.addAction(self.organization_action)
         file_menu.addSeparator()
         file_menu.addAction(self.import_action)
+        file_menu.addAction(self.import_legacy_reports_action)
         file_menu.addAction(self.export_employees_action)
         file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
@@ -121,6 +126,7 @@ class MainWindow(QMainWindow):
     def _connect(self) -> None:
         self.organization_action.triggered.connect(self.edit_organization)
         self.import_action.triggered.connect(self.import_employees)
+        self.import_legacy_reports_action.triggered.connect(self.import_legacy_reports)
         self.export_employees_action.triggered.connect(self.export_employees)
         self.exit_action.triggered.connect(self.close)
         self.directories_action.triggered.connect(self.edit_directories)
@@ -276,6 +282,17 @@ class MainWindow(QMainWindow):
         if imported is not None:
             self.statusBar().showMessage(f"Импортировано сотрудников: {imported}", 7000)
             self.refresh_employees()
+
+    def import_legacy_reports(self) -> None:
+        if not self.config.initial_setup_done:
+            self._warn("Импорт старых отчетов доступен после завершения мастера настройки ProLOG")
+            return
+        dialog = LegacyImportDialog(self.legacy_importer, self)
+        if dialog.exec():
+            self.refresh_directories()
+            self.refresh_employees()
+            self.refresh_worklogs()
+            self.statusBar().showMessage("Старые отчеты Excel импортированы", 7000)
 
     def export_employees(self) -> None:
         path = excel_export.default_employee_export_path()

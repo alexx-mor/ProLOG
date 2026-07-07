@@ -681,6 +681,34 @@ CREATE TABLE IF NOT EXISTS WorkLogEntries (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ImportBatches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_type TEXT NOT NULL DEFAULT 'legacy_excel',
+    source_file_name TEXT NOT NULL,
+    source_file_hash TEXT NOT NULL,
+    period_from TEXT NOT NULL DEFAULT '',
+    period_to TEXT NOT NULL DEFAULT '',
+    imported_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    imported_rows INTEGER NOT NULL DEFAULT 0,
+    skipped_rows INTEGER NOT NULL DEFAULT 0,
+    error_rows INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS ImportRows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL REFERENCES ImportBatches(id) ON DELETE CASCADE,
+    sheet_name TEXT NOT NULL,
+    excel_row INTEGER NOT NULL,
+    work_date TEXT NOT NULL,
+    employee_text TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    worklog_entry_id INTEGER REFERENCES WorkLogEntries(id)
+);
+
 CREATE TABLE IF NOT EXISTS Settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -689,6 +717,10 @@ CREATE TABLE IF NOT EXISTS Settings (
 CREATE INDEX IF NOT EXISTS idx_worklog_employee_date ON WorkLogEntries(employee_id, work_date);
 CREATE INDEX IF NOT EXISTS idx_worklog_date ON WorkLogEntries(work_date);
 CREATE INDEX IF NOT EXISTS idx_payrates_position ON PayRates(position_id);
+CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON ImportRows(batch_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_completed_hash
+    ON ImportBatches(source_file_hash)
+    WHERE status = 'completed';
 """
 
 

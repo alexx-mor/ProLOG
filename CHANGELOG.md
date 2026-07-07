@@ -1,5 +1,37 @@
 ﻿# Changelog
 
+## 2026-07-07 - Legacy Excel report importer
+
+### Added
+
+- Added a plugin-like `legacy_import` adapter package for old secretary-maintained Excel reports.
+- Added parsing of legacy workbooks where each sheet represents an employee and dated rows contain work text, hours, object and old location data.
+- Added import preview with row statuses, errors, warnings, missing-report notes and new-object notes.
+- Added audit tables `ImportBatches` and `ImportRows` to keep import history and row-level import explanations.
+- Added duplicate-file protection by SHA-256 hash for completed legacy imports.
+- Added `File - Импорт старых отчетов Excel` menu action, available only after the initial setup wizard is complete.
+- Added help text for legacy report import.
+
+### Changed
+
+- Legacy absences are normalized into current ProLOG locations: vacation, unpaid leave, sick leave, study leave and absence.
+- Legacy `выходной` rows are skipped and shown in the import audit instead of becoming work log entries.
+- Legacy work rows are imported as `WorkLogEntry` records through the business service layer, preserving old sheet, row, position and location in comments.
+
+### Built
+
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Build output:
+  `dist\ProLOG\ProLOG.exe`
+
+### Verified
+
+- Python syntax check passed for the changed modules using available Python 3.12.
+- SQLite schema smoke test passed: import audit tables are created on database initialization.
+- Normalization smoke test passed for old absence spellings and employee-initial matching.
+- Legacy Excel parser smoke test passed on `Отчеты Июнь 2026 АСУТП.xlsx`: 900 rows, 5764 hours, period 2026-06-01 to 2026-06-30.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-03 - MVP foundation
 
 ### Added
