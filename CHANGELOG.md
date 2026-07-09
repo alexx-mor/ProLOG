@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 2026-07-10 - Import progress and compact about dialog
+
+### Changed
+
+- Moved legacy Excel analysis to a background Qt worker thread so the import window remains responsive.
+- Added an indeterminate progress bar and status text while checking old Excel reports.
+- Temporarily disables import-window actions during analysis to prevent duplicate checks.
+- Made the About dialog more compact by reducing logo size, width and internal spacing.
+
+### Verified
+
+- Python syntax check passed for the changed UI modules.
+
 ## 2026-07-07 - Legacy Excel report importer
 
 ### Added

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListView,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -41,6 +42,9 @@ class LegacyImportDialog(QDialog):
         self.resize(1180, 680)
         self.import_service = import_service
         self.preview: LegacyImportPreview | None = None
+        self._analysis_thread: QThread | None = None
+        self._analysis_worker: LegacyAnalyzeWorker | None = None
+        self._is_analyzing = False
 
         self.title = QLabel("Импорт старых отчетов Excel")
         self.title.setObjectName("DialogTitle")
@@ -62,6 +66,13 @@ class LegacyImportDialog(QDialog):
         self.import_button.setEnabled(False)
         self.summary = QLabel("Готово к проверке")
         self.summary.setObjectName("WizardSubtitle")
+        self.progress_label = QLabel("Проверяем файл, это может занять несколько секунд...")
+        self.progress_label.setObjectName("WizardSubtitle")
+        self.progress_label.setVisible(False)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setVisible(False)
         self.issues_table = QTableWidget(0, 7)
         self.rows_table = QTableWidget(0, 10)
         self.tabs = QTabWidget()
@@ -74,6 +85,10 @@ class LegacyImportDialog(QDialog):
         file_row.addWidget(self.file_path)
         file_row.addWidget(self.browse_button)
         file_row.addWidget(self.analyze_button)
+
+        progress_row = QHBoxLayout()
+        progress_row.addWidget(self.progress_label)
+        progress_row.addWidget(self.progress_bar)
 
         summary_frame = QFrame()
         summary_frame.setObjectName("EmployeeContext")
@@ -96,6 +111,7 @@ class LegacyImportDialog(QDialog):
         layout.addWidget(self.title)
         layout.addWidget(self.note)
         layout.addLayout(file_row)
+        layout.addLayout(progress_row)
         layout.addWidget(summary_frame)
         layout.addWidget(self.tabs)
         layout.addLayout(buttons)
@@ -148,18 +164,44 @@ class LegacyImportDialog(QDialog):
         if not self.file_path.text().strip():
             self._message("Выберите Excel-файл старого отчета", QMessageBox.Icon.Information)
             return
-        try:
-            self.preview = self.import_service.analyze(Path(self.file_path.text().strip()))
-        except Exception as exc:
-            self.preview = None
-            self.edit_button.setEnabled(False)
-            self.import_button.setEnabled(False)
-            self._message(str(exc), QMessageBox.Icon.Warning)
-            return
-        self._fill_preview(self.preview)
-        self._update_actions()
-        if self.preview.has_blocking_errors:
+        self._set_analyzing(True)
+        self.preview = None
+        self.summary.setText("Идет проверка старого Excel-файла...")
+        self.issues_table.setRowCount(0)
+        self.rows_table.setRowCount(0)
+
+        thread = QThread(self)
+        worker = LegacyAnalyzeWorker(self.import_service, Path(self.file_path.text().strip()))
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._analysis_finished)
+        worker.failed.connect(self._analysis_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._analysis_thread_finished)
+        self._analysis_thread = thread
+        self._analysis_worker = worker
+        thread.start()
+
+    def _analysis_finished(self, preview: LegacyImportPreview) -> None:
+        self.preview = preview
+        self._set_analyzing(False)
+        self._fill_preview(preview)
+        if preview.has_blocking_errors:
             self.tabs.setCurrentWidget(self.issues_table)
+
+    def _analysis_failed(self, message: str) -> None:
+        self.preview = None
+        self._set_analyzing(False)
+        self.summary.setText("Проверка не выполнена")
+        self._message(message, QMessageBox.Icon.Warning)
+
+    def _analysis_thread_finished(self) -> None:
+        self._analysis_thread = None
+        self._analysis_worker = None
 
     def _commit(self) -> None:
         if self.preview is None:
@@ -313,10 +355,40 @@ class LegacyImportDialog(QDialog):
 
     def _update_actions(self) -> None:
         has_preview = self.preview is not None
-        self.edit_button.setEnabled(has_preview and self._current_row() is not None)
+        self.edit_button.setEnabled(not self._is_analyzing and has_preview and self._current_row() is not None)
         self.import_button.setEnabled(
-            bool(has_preview and self.preview and not self.preview.has_blocking_errors and self.preview.importable_count > 0)
+            bool(
+                not self._is_analyzing
+                and has_preview
+                and self.preview
+                and not self.preview.has_blocking_errors
+                and self.preview.importable_count > 0
+            )
         )
+
+    def _set_analyzing(self, is_analyzing: bool) -> None:
+        self._is_analyzing = is_analyzing
+        self.progress_label.setVisible(is_analyzing)
+        self.progress_bar.setVisible(is_analyzing)
+        self.browse_button.setEnabled(not is_analyzing)
+        self.analyze_button.setEnabled(not is_analyzing)
+        self.edit_button.setEnabled(False)
+        self.import_button.setEnabled(False)
+        self.close_button.setEnabled(not is_analyzing)
+
+    def reject(self) -> None:
+        if self._is_analyzing:
+            self._message("Дождитесь окончания проверки файла", QMessageBox.Icon.Information)
+            return
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        if self._is_analyzing:
+            self._message("Дождитесь окончания проверки файла", QMessageBox.Icon.Information)
+            event.ignore()
+            return
+        super().closeEvent(event)
+
 
     def _ask(self, title: str, message: str) -> bool:
         box = QMessageBox(self)
@@ -335,6 +407,23 @@ class LegacyImportDialog(QDialog):
         box.setIcon(icon)
         box.addButton("ОК", QMessageBox.ButtonRole.AcceptRole)
         box.exec()
+
+
+class LegacyAnalyzeWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, import_service: LegacyExcelImportService, path: Path) -> None:
+        super().__init__()
+        self.import_service = import_service
+        self.path = path
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            self.finished.emit(self.import_service.analyze(self.path))
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class LegacyRowResolutionDialog(QDialog):

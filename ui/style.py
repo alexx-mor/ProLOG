@@ -98,7 +98,7 @@ QFrame#AboutHeader {
     border-radius: 8px;
 }
 QLabel#AboutTitle {
-    font-size: 20pt;
+    font-size: 18pt;
     font-weight: 700;
     color: #1f2328;
 }
