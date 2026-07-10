@@ -118,7 +118,7 @@ def build_analytics(
         category = normalize_pay_category(employee.category if employee else "")
         pay_rate = pay_rates_by_key.get((position_name.casefold(), normalize_pay_category(category)))
         hours = int(entry.hours or 0)
-        payroll = _entry_payroll(hours, pay_rate, monthly_norm)
+        payroll = _entry_payroll(hours, pay_rate, monthly_norm, entry)
         object_name = entry.object_name or "Без объекта"
         work_type_name = entry.work_type_name or "Без вида работ"
 
@@ -185,15 +185,34 @@ def format_money(value: Decimal) -> str:
     return amount.replace(",", " ").replace(".", ",") + " руб."
 
 
-def _entry_payroll(hours: int, pay_rate: PayRate | None, monthly_hours_norm: int) -> Decimal:
+def _entry_payroll(
+    hours: int,
+    pay_rate: PayRate | None,
+    monthly_hours_norm: int,
+    entry: WorkLogEntry,
+) -> Decimal:
     if hours <= 0 or pay_rate is None:
         return Decimal("0")
     salary = _parse_money(pay_rate.salary)
     if salary <= 0:
         return Decimal("0")
+    multiplier = _payroll_multiplier(pay_rate, entry)
     if pay_rate.salary_type == "monthly":
-        return salary / Decimal(monthly_hours_norm) * Decimal(hours)
-    return salary * Decimal(hours)
+        return salary / Decimal(monthly_hours_norm) * Decimal(hours) * multiplier
+    return salary * Decimal(hours) * multiplier
+
+
+def _payroll_multiplier(pay_rate: PayRate, entry: WorkLogEntry) -> Decimal:
+    if entry.work_date.weekday() == 6:
+        return _parse_coefficient(pay_rate.holiday_coeff)
+    if entry.work_date.weekday() == 5:
+        return _parse_coefficient(pay_rate.saturday_coeff)
+    location = (entry.location_name or "").casefold()
+    if "кд" in location or "дальн" in location:
+        return _parse_coefficient(pay_rate.far_trip_coeff)
+    if "кб" in location or "ближн" in location:
+        return _parse_coefficient(pay_rate.near_trip_coeff)
+    return Decimal("1")
 
 
 def _parse_money(value: str) -> Decimal:
@@ -204,3 +223,14 @@ def _parse_money(value: str) -> Decimal:
         return Decimal(normalized)
     except InvalidOperation:
         return Decimal("0")
+
+
+def _parse_coefficient(value: str) -> Decimal:
+    normalized = value.strip().replace(" ", "").replace(",", ".")
+    if not normalized:
+        return Decimal("1")
+    try:
+        result = Decimal(normalized)
+    except InvalidOperation:
+        return Decimal("1")
+    return result if result > 0 else Decimal("1")

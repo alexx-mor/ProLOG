@@ -46,14 +46,55 @@ class DirectoryService:
     ) -> None:
         self.repository.update_position_details(item_id, name, category, student_allowed, salary, salary_type, group)
 
+    def update_object_details(
+        self,
+        item_id: int,
+        name: str,
+        project_number: str,
+        customer: str,
+        contract_type: str,
+        object_type: str,
+        object_subtype: str,
+        signed_date: str,
+        due_date: str,
+    ) -> None:
+        self.repository.update_object_details(
+            item_id,
+            name,
+            project_number,
+            customer,
+            contract_type,
+            object_type,
+            object_subtype,
+            signed_date,
+            due_date,
+        )
+
     def delete(self, key: str, item_id: int) -> None:
         self.repository.delete(key, item_id)
 
     def list_pay_rates(self):
         return self.repository.list_pay_rates()
 
-    def update_pay_rate(self, item_id: int, salary: str, salary_type: str) -> None:
-        self.repository.update_pay_rate(item_id, salary, salary_type)
+    def update_pay_rate(
+        self,
+        item_id: int,
+        salary: str,
+        salary_type: str,
+        far_trip_coeff: str,
+        near_trip_coeff: str,
+        holiday_coeff: str,
+        saturday_coeff: str,
+    ) -> None:
+        self.repository.update_pay_rate(
+            item_id,
+            salary,
+            salary_type,
+            far_trip_coeff,
+            near_trip_coeff,
+            holiday_coeff,
+            saturday_coeff,
+        )
 
     def category_for_position(self, position: str) -> str:
         return self.repository.category_for_position(position)

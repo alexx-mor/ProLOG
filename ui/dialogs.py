@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import webbrowser
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDateEdit,
     QDialog,
     QFormLayout,
     QFrame,
@@ -191,6 +192,10 @@ class PositionDialog(QDialog):
         self.salary_type.addItem("Зарплата", "monthly")
         self.group = QComboBox()
         self.group.addItems(self.GROUPS)
+        self.is_active = position.is_active if position else True
+        self.status_label = QLabel()
+        self.toggle_active_button = QPushButton()
+        self._sync_active_controls()
 
         if position:
             category = position.category or "—"
@@ -202,11 +207,14 @@ class PositionDialog(QDialog):
             self.salary_type.setCurrentIndex(index if index >= 0 else 0)
             group = position.group or "Рабочие"
             self.group.setCurrentText(group if group in self.GROUPS else "Рабочие")
+            self.is_active = position.is_active
+            self._sync_active_controls()
 
         save_button = QPushButton("Сохранить")
         cancel_button = QPushButton("Отмена")
         save_button.clicked.connect(self.accept)
         cancel_button.clicked.connect(self.reject)
+        self.toggle_active_button.clicked.connect(self._toggle_active)
         buttons = QHBoxLayout()
         buttons.addStretch()
         buttons.addWidget(save_button)
@@ -216,9 +224,11 @@ class PositionDialog(QDialog):
         layout.addRow("Категории", self.category)
         layout.addRow("", self.student_allowed)
         layout.addRow("Группа", self.group)
+        layout.addRow("Статус", self.status_label)
+        layout.addRow("", self.toggle_active_button)
         layout.addRow(buttons)
 
-    def values(self) -> tuple[str, str, bool, str, str, str]:
+    def values(self) -> tuple[str, str, bool, str, str, str, bool]:
         return (
             self.name.text().strip(),
             self.category.currentText().strip() or "—",
@@ -226,6 +236,7 @@ class PositionDialog(QDialog):
             self.salary.text().strip(),
             str(self.salary_type.currentData() or "hourly"),
             self.group.currentText().strip() or "Рабочие",
+            self.is_active,
         )
 
     def accept(self) -> None:
@@ -242,12 +253,158 @@ class PositionDialog(QDialog):
         box.addButton("ОК", QMessageBox.ButtonRole.AcceptRole)
         box.exec()
 
+    def _toggle_active(self) -> None:
+        self.is_active = not self.is_active
+        self._sync_active_controls()
+
+    def _sync_active_controls(self) -> None:
+        self.status_label.setText("Активна" if self.is_active else "Отключена")
+        self.toggle_active_button.setText("Отключить" if self.is_active else "Активировать")
+
+
+class ObjectDialog(QDialog):
+    CONTRACT_TYPES = ("", "Поставка", "Строительство (СМР)")
+    OBJECT_TYPES = ("", "Очистные сооружения", "Насосные станции", "Резервуары и емкости", "Другое")
+    SUBTYPES = {
+        "Очистные сооружения": ("КОС", "МБР", "ВОС", "ЛОС", "ОСЛВ", "Сливная станция"),
+        "Насосные станции": ("ВНС", "КНС", "НС"),
+        "Резервуары и емкости": ("РВС", "РПВ", "РК"),
+        "Другое": (),
+    }
+
+    def __init__(self, item: DirectoryItem | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Объект")
+        self.setMinimumWidth(720)
+        self.name = QLineEdit(item.name if item else "")
+        self.project_number = QLineEdit(item.project_number if item else "")
+        self.customer = QLineEdit(item.customer if item else "")
+        self.contract_type = QComboBox()
+        self.contract_type.addItems(self.CONTRACT_TYPES)
+        self.object_type = QComboBox()
+        self.object_type.addItems(self.OBJECT_TYPES)
+        self.object_subtype = QComboBox()
+        self.object_subtype.setEditable(True)
+        self.signed_date = QDateEdit()
+        self.due_date = QDateEdit()
+        self.days_left = QLabel("")
+        self.days_left.setObjectName("WizardSubtitle")
+        for date_edit in (self.signed_date, self.due_date):
+            date_edit.setCalendarPopup(True)
+            date_edit.setDisplayFormat("dd.MM.yyyy")
+            date_edit.setSpecialValueText("")
+            date_edit.setMinimumDate(QDate(2000, 1, 1))
+            date_edit.setMaximumDate(QDate(2100, 12, 31))
+
+        if item:
+            self._set_combo_text(self.contract_type, item.contract_type)
+            self._set_combo_text(self.object_type, item.object_type)
+        self._sync_subtypes(item.object_subtype if item else "")
+        if item:
+            self._set_date(self.signed_date, item.signed_date)
+            self._set_date(self.due_date, item.due_date)
+        else:
+            today = QDate.currentDate()
+            self.signed_date.setDate(today)
+            self.due_date.setDate(today)
+
+        save_button = QPushButton("Сохранить")
+        cancel_button = QPushButton("Отмена")
+        save_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(save_button)
+        buttons.addWidget(cancel_button)
+
+        layout = QFormLayout(self)
+        layout.addRow("Общее наименование", self.name)
+        layout.addRow("№ проекта/заявки", self.project_number)
+        layout.addRow("Заказчик", self.customer)
+        layout.addRow("Тип", self.contract_type)
+        layout.addRow("Тип объекта", self.object_type)
+        layout.addRow("Подтип объекта", self.object_subtype)
+        layout.addRow("Дата подписания", self.signed_date)
+        due_row = QHBoxLayout()
+        due_row.addWidget(self.due_date)
+        due_row.addWidget(self.days_left)
+        layout.addRow("Дата окончания", due_row)
+        layout.addRow(buttons)
+
+        self.object_type.currentTextChanged.connect(lambda _text: self._sync_subtypes())
+        self.due_date.dateChanged.connect(lambda _date: self._refresh_days_left())
+        self._refresh_days_left()
+
+    def values(self) -> tuple[str, str, str, str, str, str, str, str]:
+        return (
+            self.name.text().strip(),
+            self.project_number.text().strip(),
+            self.customer.text().strip(),
+            self.contract_type.currentText().strip(),
+            self.object_type.currentText().strip(),
+            self.object_subtype.currentText().strip(),
+            self._date_value(self.signed_date),
+            self._date_value(self.due_date),
+        )
+
+    def accept(self) -> None:
+        if not self.name.text().strip():
+            self._info("Укажите общее наименование объекта")
+            return
+        super().accept()
+
+    def _sync_subtypes(self, current: str = "") -> None:
+        object_type = self.object_type.currentText().strip()
+        values = self.SUBTYPES.get(object_type, ())
+        current_text = current or self.object_subtype.currentText().strip()
+        self.object_subtype.blockSignals(True)
+        self.object_subtype.clear()
+        self.object_subtype.addItem("")
+        self.object_subtype.addItems(values)
+        self.object_subtype.setEditable(True)
+        if current_text:
+            if self.object_subtype.findText(current_text) < 0:
+                self.object_subtype.addItem(current_text)
+            self.object_subtype.setCurrentText(current_text)
+        self.object_subtype.blockSignals(False)
+
+    def _refresh_days_left(self) -> None:
+        days = QDate.currentDate().daysTo(self.due_date.date())
+        if days > 0:
+            text = f"Осталось дней: {days}"
+        elif days == 0:
+            text = "Срок сдачи сегодня"
+        else:
+            text = f"Просрочено дней: {abs(days)}"
+        self.days_left.setText(text)
+
+    def _set_combo_text(self, combo: QComboBox, value: str) -> None:
+        if value and combo.findText(value) < 0:
+            combo.addItem(value)
+        if value:
+            combo.setCurrentText(value)
+
+    def _set_date(self, date_edit: QDateEdit, value: str) -> None:
+        date_value = QDate.fromString(value, "yyyy-MM-dd")
+        date_edit.setDate(date_value if date_value.isValid() else QDate.currentDate())
+
+    def _date_value(self, date_edit: QDateEdit) -> str:
+        return date_edit.date().toString("yyyy-MM-dd")
+
+    def _info(self, message: str) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle("Объект")
+        box.setText(message)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.addButton("ОК", QMessageBox.ButtonRole.AcceptRole)
+        box.exec()
+
 
 class PayRateDialog(QDialog):
     def __init__(self, pay_rate: PayRate, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Оплата")
-        self.setMinimumWidth(620)
+        self.setMinimumWidth(680)
         self.position = QLineEdit(pay_rate.position_name)
         self.position.setReadOnly(True)
         self.category = QLineEdit(pay_rate.category)
@@ -259,6 +416,12 @@ class PayRateDialog(QDialog):
         self.salary_type.setCurrentIndex(index if index >= 0 else 0)
         self.salary = QLineEdit(pay_rate.salary)
         self.salary.setPlaceholderText("Например: 450 или 70000")
+        self.far_trip_coeff = QLineEdit(pay_rate.far_trip_coeff)
+        self.near_trip_coeff = QLineEdit(pay_rate.near_trip_coeff)
+        self.holiday_coeff = QLineEdit(pay_rate.holiday_coeff)
+        self.saturday_coeff = QLineEdit(pay_rate.saturday_coeff)
+        for coeff in (self.far_trip_coeff, self.near_trip_coeff, self.holiday_coeff, self.saturday_coeff):
+            coeff.setPlaceholderText("Например: 1,5")
 
         save_button = QPushButton("Сохранить")
         cancel_button = QPushButton("Отмена")
@@ -273,11 +436,22 @@ class PayRateDialog(QDialog):
         layout.addRow("Должность", self.position)
         layout.addRow("Категория", self.category)
         layout.addRow("Тип оплаты", self.salary_type)
-        layout.addRow("Сумма", self.salary)
+        layout.addRow("Сумма на месте", self.salary)
+        layout.addRow("КД (дальняя командировка)", self.far_trip_coeff)
+        layout.addRow("КТУ КБ (ближняя командировка)", self.near_trip_coeff)
+        layout.addRow("КТУ воскр. и праздники", self.holiday_coeff)
+        layout.addRow("КТУ суббота", self.saturday_coeff)
         layout.addRow(buttons)
 
-    def values(self) -> tuple[str, str]:
-        return self.salary.text().strip(), str(self.salary_type.currentData() or "hourly")
+    def values(self) -> tuple[str, str, str, str, str, str]:
+        return (
+            self.salary.text().strip(),
+            str(self.salary_type.currentData() or "hourly"),
+            self.far_trip_coeff.text().strip(),
+            self.near_trip_coeff.text().strip(),
+            self.holiday_coeff.text().strip(),
+            self.saturday_coeff.text().strip(),
+        )
 
 
 class DirectoryDialog(QDialog):
@@ -344,6 +518,20 @@ class DirectoryDialog(QDialog):
                 group.setToolTip(group.text())
                 self.table.setItem(row, 2, student)
                 self.table.setItem(row, 3, group)
+            elif self.current_key == "objects":
+                values = [
+                    item.project_number,
+                    item.customer,
+                    item.contract_type,
+                    item.object_type,
+                    item.object_subtype,
+                    _display_date(item.due_date),
+                    _days_left_display(item.due_date),
+                ]
+                for column, value in enumerate(values, start=1):
+                    cell = QTableWidgetItem(value)
+                    cell.setToolTip(value)
+                    self.table.setItem(row, column, cell)
             status_column = self._status_column()
             self.table.setItem(row, status_column, _status_item(item.is_active))
             if not item.is_active:
@@ -361,13 +549,20 @@ class DirectoryDialog(QDialog):
             salary_type.setToolTip(salary_type.text())
             salary = QTableWidgetItem(item.salary)
             salary.setToolTip(item.salary)
-            payment = QTableWidgetItem(_salary_display(item.salary, item.salary_type))
-            payment.setToolTip(payment.text())
+            far_trip = QTableWidgetItem(item.far_trip_coeff)
+            near_trip = QTableWidgetItem(item.near_trip_coeff)
+            holiday = QTableWidgetItem(item.holiday_coeff)
+            saturday = QTableWidgetItem(item.saturday_coeff)
+            for cell in (far_trip, near_trip, holiday, saturday):
+                cell.setToolTip(cell.text())
             self.table.setItem(row, 0, position)
             self.table.setItem(row, 1, category)
             self.table.setItem(row, 2, salary_type)
             self.table.setItem(row, 3, salary)
-            self.table.setItem(row, 4, payment)
+            self.table.setItem(row, 4, far_trip)
+            self.table.setItem(row, 5, near_trip)
+            self.table.setItem(row, 6, holiday)
+            self.table.setItem(row, 7, saturday)
 
     def _build_layout(self) -> None:
         header = QLabel("Справочники")
@@ -432,7 +627,7 @@ class DirectoryDialog(QDialog):
         if self.current_key == "positions":
             dialog = PositionDialog(parent=self)
             if dialog.exec():
-                name, category, student_allowed, salary, salary_type, group = dialog.values()
+                name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 item_id = self.directory_service.ensure("positions", name)
                 if item_id is not None:
                     self.directory_service.update_position_details(
@@ -444,6 +639,16 @@ class DirectoryDialog(QDialog):
                         salary_type,
                         group,
                     )
+                    self.directory_service.set_active("positions", item_id, is_active)
+                self.refresh()
+            return
+        if self.current_key == "objects":
+            dialog = ObjectDialog(parent=self)
+            if dialog.exec():
+                values = dialog.values()
+                item_id = self.directory_service.ensure("objects", values[0])
+                if item_id is not None:
+                    self.directory_service.update_object_details(item_id, *values)
                 self.refresh()
             return
         dialog = TextInputDialog("Добавить", "Название", parent=self)
@@ -464,8 +669,7 @@ class DirectoryDialog(QDialog):
                 return
             dialog = PayRateDialog(item, self)
             if dialog.exec():
-                salary, salary_type = dialog.values()
-                self.directory_service.update_pay_rate(item_id, salary, salary_type)
+                self.directory_service.update_pay_rate(item_id, *dialog.values())
                 self.refresh()
             return
         if self.current_key == "positions":
@@ -475,7 +679,7 @@ class DirectoryDialog(QDialog):
                 return
             dialog = PositionDialog(item, self)
             if dialog.exec():
-                name, category, student_allowed, salary, salary_type, group = dialog.values()
+                name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 self.directory_service.update_position_details(
                     item_id,
                     name,
@@ -485,6 +689,17 @@ class DirectoryDialog(QDialog):
                     salary_type,
                     group,
                 )
+                self.directory_service.set_active("positions", item_id, is_active)
+                self.refresh()
+            return
+        if self.current_key == "objects":
+            item = self._selected_item()
+            if item is None:
+                self._info("Выберите строку")
+                return
+            dialog = ObjectDialog(item, self)
+            if dialog.exec():
+                self.directory_service.update_object_details(item_id, *dialog.values())
                 self.refresh()
             return
         dialog = TextInputDialog("Переименовать", "Название", self._selected_name(), self)
@@ -525,7 +740,7 @@ class DirectoryDialog(QDialog):
         row = self.table.currentRow()
         if row < 0 or row >= len(self._items):
             return
-        if self.current_key == "pay_rates":
+        if self.current_key in {"pay_rates", "positions", "objects"}:
             self._rename_item()
             return
         self.directory_service.set_active(self.current_key, self._items[row].id, not self._items[row].is_active)
@@ -576,17 +791,41 @@ class DirectoryDialog(QDialog):
             self.table.setColumnWidth(3, 82)
             self.table.setColumnWidth(4, 92)
         elif self.current_key == "pay_rates":
-            self.table.setColumnCount(5)
-            self.table.setHorizontalHeaderLabels(["Должность", "Категория", "Тип", "Сумма", "Оплата"])
+            self.table.setColumnCount(8)
+            self.table.setHorizontalHeaderLabels(["Должность", "Кат.", "Тип", "На месте", "КД", "КТУ КБ", "Воскр./празд.", "Суббота"])
             self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
             self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-            self.table.setColumnWidth(0, 430)
-            self.table.setColumnWidth(1, 100)
-            self.table.setColumnWidth(2, 95)
-            self.table.setColumnWidth(3, 110)
+            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(0, 330)
+            self.table.setColumnWidth(1, 62)
+            self.table.setColumnWidth(2, 88)
+            self.table.setColumnWidth(3, 100)
+            self.table.setColumnWidth(4, 64)
+            self.table.setColumnWidth(5, 78)
+            self.table.setColumnWidth(6, 112)
+            self.table.setColumnWidth(7, 82)
+        elif self.current_key == "objects":
+            self.table.setColumnCount(9)
+            self.table.setHorizontalHeaderLabels(
+                ["Объект", "№ проекта", "Заказчик", "Тип", "Тип объекта", "Подтип", "Дата окончания", "Осталось", "Статус"]
+            )
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            for column in range(1, 9):
+                self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(0, 260)
+            self.table.setColumnWidth(1, 110)
+            self.table.setColumnWidth(2, 170)
+            self.table.setColumnWidth(3, 135)
+            self.table.setColumnWidth(4, 150)
+            self.table.setColumnWidth(5, 100)
+            self.table.setColumnWidth(6, 105)
+            self.table.setColumnWidth(7, 110)
+            self.table.setColumnWidth(8, 92)
         else:
             self.table.setColumnCount(2)
             self.table.setHorizontalHeaderLabels(["Название", "Статус"])
@@ -596,7 +835,11 @@ class DirectoryDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(False)
 
     def _status_column(self) -> int:
-        return 4 if self.current_key == "positions" else 1
+        if self.current_key == "positions":
+            return 4
+        if self.current_key == "objects":
+            return 8
+        return 1
 
     def _update_button_visibility(self) -> None:
         is_pay_rates = self.current_key == "pay_rates"
@@ -657,6 +900,23 @@ def _salary_display(value: str, salary_type: str) -> str:
         return ""
     suffix = " / мес" if salary_type == "monthly" else " / час"
     return f"{value.strip()}{suffix}"
+
+
+def _display_date(value: str) -> str:
+    date_value = QDate.fromString(value, "yyyy-MM-dd")
+    return date_value.toString("dd.MM.yyyy") if date_value.isValid() else ""
+
+
+def _days_left_display(value: str) -> str:
+    date_value = QDate.fromString(value, "yyyy-MM-dd")
+    if not date_value.isValid():
+        return ""
+    days = QDate.currentDate().daysTo(date_value)
+    if days > 0:
+        return f"{days} дн."
+    if days == 0:
+        return "Сегодня"
+    return f"Проср. {abs(days)} дн."
 
 
 class HelpDialog(QDialog):

@@ -2,16 +2,28 @@
 
 ## 2026-07-10 - Import progress and compact about dialog
 
+### Added
+
+- Added project-card fields for objects: project/request number, customer, contract type, object type, subtype, signing date and due date.
+- Added automatic days-left display for object due dates.
+- Added pay coefficients for far business trips, near business trips, Sundays/holidays and Saturdays in the payment directory.
+- Added active/inactive indicator and activation button inside the position edit dialog.
+
 ### Changed
 
 - Moved legacy Excel analysis to a background Qt worker thread so the import window remains responsive.
 - Added an indeterminate progress bar and status text while checking old Excel reports.
 - Temporarily disables import-window actions during analysis to prevent duplicate checks.
 - Made the About dialog more compact by reducing logo size, width and internal spacing.
+- Position rows now open the edit dialog on double click.
+- Payroll analytics now applies payment coefficients by location and weekend day.
 
 ### Verified
 
 - Python syntax check passed for the changed UI modules.
+- SQLite schema smoke test passed for expanded `Objects` and `PayRates` tables.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
 
 ## 2026-07-07 - Legacy Excel report importer
 

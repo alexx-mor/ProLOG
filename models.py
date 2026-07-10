@@ -35,6 +35,13 @@ class DirectoryItem:
     salary: str = ""
     salary_type: str = "hourly"
     group: str = ""
+    project_number: str = ""
+    customer: str = ""
+    contract_type: str = ""
+    object_type: str = ""
+    object_subtype: str = ""
+    signed_date: str = ""
+    due_date: str = ""
 
 
 @dataclass(slots=True)
@@ -44,6 +51,10 @@ class PayRate:
     category: str
     salary: str = ""
     salary_type: str = "hourly"
+    far_trip_coeff: str = "1"
+    near_trip_coeff: str = "1"
+    holiday_coeff: str = "1"
+    saturday_coeff: str = "1"
     id: int | None = None
 
 

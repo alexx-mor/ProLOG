@@ -69,6 +69,28 @@ class Database:
             connection.execute("ALTER TABLE Positions ADD COLUMN salary_type TEXT NOT NULL DEFAULT 'hourly'")
         if "employee_group" not in position_columns:
             connection.execute("ALTER TABLE Positions ADD COLUMN employee_group TEXT NOT NULL DEFAULT 'Рабочие'")
+        pay_rate_columns = {row["name"] for row in connection.execute("PRAGMA table_info(PayRates)")}
+        if "far_trip_coeff" not in pay_rate_columns:
+            connection.execute("ALTER TABLE PayRates ADD COLUMN far_trip_coeff TEXT NOT NULL DEFAULT '1'")
+        if "near_trip_coeff" not in pay_rate_columns:
+            connection.execute("ALTER TABLE PayRates ADD COLUMN near_trip_coeff TEXT NOT NULL DEFAULT '1'")
+        if "holiday_coeff" not in pay_rate_columns:
+            connection.execute("ALTER TABLE PayRates ADD COLUMN holiday_coeff TEXT NOT NULL DEFAULT '1'")
+        if "saturday_coeff" not in pay_rate_columns:
+            connection.execute("ALTER TABLE PayRates ADD COLUMN saturday_coeff TEXT NOT NULL DEFAULT '1'")
+        object_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Objects)")}
+        object_defaults = {
+            "project_number": "",
+            "customer": "",
+            "contract_type": "",
+            "object_type": "",
+            "object_subtype": "",
+            "signed_date": "",
+            "due_date": "",
+        }
+        for column, default in object_defaults.items():
+            if column not in object_columns:
+                connection.execute(f"ALTER TABLE Objects ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'")
         connection.execute("UPDATE Positions SET category = '—', student_allowed = 0 WHERE name = 'Мастер чистоты'")
         self._sync_pay_rates(connection)
 
@@ -156,25 +178,45 @@ class DirectoryRepository:
 
     def list_items(self, table_key: str, active_only: bool = True) -> list[DirectoryItem]:
         table = self._table(table_key)
-        fields = (
-            "id, name, is_active, category, student_allowed, salary, salary_type, employee_group"
-            if table_key == "positions"
-            else "id, name, is_active, '' AS category, 0 AS student_allowed, '' AS salary, 'hourly' AS salary_type, '' AS employee_group"
-        )
+        if table_key == "positions":
+            fields = (
+                "id, name, is_active, category, student_allowed, salary, salary_type, employee_group, "
+                "'' AS project_number, '' AS customer, '' AS contract_type, '' AS object_type, "
+                "'' AS object_subtype, '' AS signed_date, '' AS due_date"
+            )
+        elif table_key == "objects":
+            fields = (
+                "id, name, is_active, '' AS category, 0 AS student_allowed, '' AS salary, "
+                "'hourly' AS salary_type, '' AS employee_group, project_number, customer, "
+                "contract_type, object_type, object_subtype, signed_date, due_date"
+            )
+        else:
+            fields = (
+                "id, name, is_active, '' AS category, 0 AS student_allowed, '' AS salary, "
+                "'hourly' AS salary_type, '' AS employee_group, '' AS project_number, '' AS customer, "
+                "'' AS contract_type, '' AS object_type, '' AS object_subtype, '' AS signed_date, '' AS due_date"
+            )
         sql = f"SELECT {fields} FROM {table}"
         if active_only:
             sql += " WHERE is_active = 1"
         with self.database.connect() as connection:
             items = [
                 DirectoryItem(
-                    row["name"],
-                    row["id"],
-                    bool(row["is_active"]),
-                    row["category"] or "",
-                    bool(row["student_allowed"]),
-                    row["salary"] or "",
-                    row["salary_type"] or "hourly",
-                    row["employee_group"] or "",
+                    name=row["name"],
+                    id=row["id"],
+                    is_active=bool(row["is_active"]),
+                    category=row["category"] or "",
+                    student_allowed=bool(row["student_allowed"]),
+                    salary=row["salary"] or "",
+                    salary_type=row["salary_type"] or "hourly",
+                    group=row["employee_group"] or "",
+                    project_number=row["project_number"] or "",
+                    customer=row["customer"] or "",
+                    contract_type=row["contract_type"] or "",
+                    object_type=row["object_type"] or "",
+                    object_subtype=row["object_subtype"] or "",
+                    signed_date=row["signed_date"] or "",
+                    due_date=row["due_date"] or "",
                 )
                 for row in connection.execute(sql)
             ]
@@ -274,6 +316,48 @@ class DirectoryRepository:
             )
             self.database._sync_pay_rates(connection)
 
+    def update_object_details(
+        self,
+        item_id: int,
+        name: str,
+        project_number: str,
+        customer: str,
+        contract_type: str,
+        object_type: str,
+        object_subtype: str,
+        signed_date: str,
+        due_date: str,
+    ) -> None:
+        normalized = name.strip()
+        if not normalized:
+            raise ValueError("Укажите общее наименование объекта")
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE Objects
+                SET name = ?,
+                    project_number = ?,
+                    customer = ?,
+                    contract_type = ?,
+                    object_type = ?,
+                    object_subtype = ?,
+                    signed_date = ?,
+                    due_date = ?
+                WHERE id = ?
+                """,
+                (
+                    normalized,
+                    project_number.strip(),
+                    customer.strip(),
+                    contract_type.strip(),
+                    object_type.strip(),
+                    object_subtype.strip(),
+                    signed_date.strip(),
+                    due_date.strip(),
+                    item_id,
+                ),
+            )
+
     def list_pay_rates(self) -> list[PayRate]:
         with self.database.connect() as connection:
             self.database._sync_pay_rates(connection)
@@ -296,7 +380,11 @@ class DirectoryRepository:
                     p.name AS position_name,
                     pr.category,
                     pr.salary,
-                    pr.salary_type
+                    pr.salary_type,
+                    pr.far_trip_coeff,
+                    pr.near_trip_coeff,
+                    pr.holiday_coeff,
+                    pr.saturday_coeff
                 FROM PayRates pr
                 JOIN Positions p ON p.id = pr.position_id
                 WHERE p.is_active = 1
@@ -311,20 +399,46 @@ class DirectoryRepository:
                 category=row["category"] or NO_CATEGORY,
                 salary=row["salary"] or "",
                 salary_type=_normalize_salary_type(row["salary_type"] or "hourly"),
+                far_trip_coeff=row["far_trip_coeff"] or "1",
+                near_trip_coeff=row["near_trip_coeff"] or "1",
+                holiday_coeff=row["holiday_coeff"] or "1",
+                saturday_coeff=row["saturday_coeff"] or "1",
             )
             for row in rows
             if row["category"] in expected.get(row["position_id"], set())
         ]
 
-    def update_pay_rate(self, item_id: int, salary: str, salary_type: str) -> None:
+    def update_pay_rate(
+        self,
+        item_id: int,
+        salary: str,
+        salary_type: str,
+        far_trip_coeff: str,
+        near_trip_coeff: str,
+        holiday_coeff: str,
+        saturday_coeff: str,
+    ) -> None:
         with self.database.connect() as connection:
             connection.execute(
                 """
                 UPDATE PayRates
-                SET salary = ?, salary_type = ?
+                SET salary = ?,
+                    salary_type = ?,
+                    far_trip_coeff = ?,
+                    near_trip_coeff = ?,
+                    holiday_coeff = ?,
+                    saturday_coeff = ?
                 WHERE id = ?
                 """,
-                (salary.strip(), _normalize_salary_type(salary_type), item_id),
+                (
+                    salary.strip(),
+                    _normalize_salary_type(salary_type),
+                    _normalize_coefficient(far_trip_coeff),
+                    _normalize_coefficient(near_trip_coeff),
+                    _normalize_coefficient(holiday_coeff),
+                    _normalize_coefficient(saturday_coeff),
+                    item_id,
+                ),
             )
 
     def set_active(self, table_key: str, item_id: int, is_active: bool) -> None:
@@ -624,6 +738,13 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS Objects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    project_number TEXT NOT NULL DEFAULT '',
+    customer TEXT NOT NULL DEFAULT '',
+    contract_type TEXT NOT NULL DEFAULT '',
+    object_type TEXT NOT NULL DEFAULT '',
+    object_subtype TEXT NOT NULL DEFAULT '',
+    signed_date TEXT NOT NULL DEFAULT '',
+    due_date TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
@@ -650,6 +771,10 @@ CREATE TABLE IF NOT EXISTS PayRates (
     category TEXT NOT NULL DEFAULT '—',
     salary TEXT NOT NULL DEFAULT '',
     salary_type TEXT NOT NULL DEFAULT 'hourly',
+    far_trip_coeff TEXT NOT NULL DEFAULT '1',
+    near_trip_coeff TEXT NOT NULL DEFAULT '1',
+    holiday_coeff TEXT NOT NULL DEFAULT '1',
+    saturday_coeff TEXT NOT NULL DEFAULT '1',
     UNIQUE(position_id, category)
 );
 
@@ -746,3 +871,8 @@ def _default_position_group(name: str) -> str:
 
 def _normalize_salary_type(value: str) -> str:
     return "monthly" if value == "monthly" else "hourly"
+
+
+def _normalize_coefficient(value: str) -> str:
+    normalized = value.strip().replace(",", ".")
+    return normalized or "1"
