@@ -24,6 +24,14 @@ class ObjectStatus(StrEnum):
     CLOSED = "Закрыт"
 
 
+class ProductStatus(StrEnum):
+    PLANNED = "Планируется"
+    IN_PROGRESS = "В изготовлении"
+    PAUSED = "Приостановлено"
+    READY = "Готово"
+    RELEASED = "Выпущено"
+
+
 class WorkDayType(StrEnum):
     WORKDAY = "Рабочий день"
     DAY_OFF = "Выходной"
@@ -52,6 +60,7 @@ class DirectoryItem:
     salary_type: str = "hourly"
     group: str = ""
     project_number: str = ""
+    contract_number: str = ""
     customer: str = ""
     contract_type: str = ""
     object_type: str = ""
@@ -72,6 +81,21 @@ class PayRate:
     near_trip_coeff: str = "1"
     holiday_coeff: str = "1"
     saturday_coeff: str = "1"
+    id: int | None = None
+
+
+@dataclass(slots=True)
+class ProductItem:
+    object_id: int
+    name: str
+    serial_number: str = ""
+    code: str = ""
+    product_status: str = ProductStatus.IN_PROGRESS.value
+    readiness_percent: int = 0
+    start_date: str = ""
+    release_date: str = ""
+    object_name: str = ""
+    is_active: bool = True
     id: int | None = None
 
 

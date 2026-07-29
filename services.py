@@ -8,7 +8,7 @@ from analytics import AnalyticsResult, build_analytics
 from category_rules import category_values_from_rule, normalize_employee_category
 from directory_files import load_position_category_map
 from database import DirectoryRepository, EmployeeRepository, WorkLogRepository
-from models import Employee, WorkCalendarDay, WorkLogEntry
+from models import Employee, ProductItem, WorkCalendarDay, WorkLogEntry
 
 
 class DirectoryService:
@@ -51,6 +51,7 @@ class DirectoryService:
         item_id: int,
         name: str,
         project_number: str,
+        contract_number: str,
         customer: str,
         contract_type: str,
         object_type: str,
@@ -63,6 +64,7 @@ class DirectoryService:
             item_id,
             name,
             project_number,
+            contract_number,
             customer,
             contract_type,
             object_type,
@@ -87,6 +89,18 @@ class DirectoryService:
 
     def delete_calendar_day(self, item_id: int) -> None:
         self.repository.delete_calendar_day(item_id)
+
+    def list_products(self, active_only: bool = False) -> list[ProductItem]:
+        return self.repository.list_products(active_only)
+
+    def save_product(self, product: ProductItem) -> int:
+        return self.repository.save_product(product)
+
+    def set_product_active(self, product_id: int, is_active: bool) -> None:
+        self.repository.set_product_active(product_id, is_active)
+
+    def delete_product(self, product_id: int) -> None:
+        self.repository.delete_product(product_id)
 
     def list_pay_rates(self):
         return self.repository.list_pay_rates()

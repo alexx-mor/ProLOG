@@ -1,5 +1,27 @@
 ﻿# Changelog
 
+## 2026-07-29 - Product directory and pay table redesign
+
+### Added
+
+- Added product directory with required object binding, serial number, name, code, status, readiness percent, production start date and release date.
+- Added contract number to object cards and object storage.
+- Added overdue highlighting for object due dates in the object edit dialog and directory table.
+
+### Changed
+
+- Redesigned payment directory as a position-based summary table with category 0-3 amount columns and KTU coefficient columns.
+- Payment amounts are displayed in human-readable money format, for example `100 000,00`.
+- Object edit dialog now shows contract fields before customer and classification fields.
+- Renamed object contract field label from `Тип` to `Предмет договора`.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- SQLite schema smoke test passed for `Objects` and `Products`.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-29 - Calendar, analytics and object lifecycle
 
 ### Added

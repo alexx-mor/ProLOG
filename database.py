@@ -19,7 +19,17 @@ from directory_files import (
     load_position_seed_map,
     load_positions,
 )
-from models import DirectoryItem, Employee, ObjectStatus, PayRate, WorkCalendarDay, WorkDayType, WorkLogEntry
+from models import (
+    DirectoryItem,
+    Employee,
+    ObjectStatus,
+    PayRate,
+    ProductItem,
+    ProductStatus,
+    WorkCalendarDay,
+    WorkDayType,
+    WorkLogEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +91,7 @@ class Database:
         object_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Objects)")}
         object_defaults = {
             "project_number": "",
+            "contract_number": "",
             "customer": "",
             "contract_type": "",
             "object_type": "",
@@ -182,19 +193,19 @@ class DirectoryRepository:
         if table_key == "positions":
             fields = (
                 "id, name, is_active, category, student_allowed, salary, salary_type, employee_group, "
-                "'' AS project_number, '' AS customer, '' AS contract_type, '' AS object_type, "
+                "'' AS project_number, '' AS contract_number, '' AS customer, '' AS contract_type, '' AS object_type, "
                 "'' AS object_subtype, '' AS signed_date, '' AS due_date, '' AS object_status"
             )
         elif table_key == "objects":
             fields = (
                 "id, name, is_active, '' AS category, 0 AS student_allowed, '' AS salary, "
-                "'hourly' AS salary_type, '' AS employee_group, project_number, customer, "
+                "'hourly' AS salary_type, '' AS employee_group, project_number, contract_number, customer, "
                 "contract_type, object_type, object_subtype, signed_date, due_date, object_status"
             )
         else:
             fields = (
                 "id, name, is_active, '' AS category, 0 AS student_allowed, '' AS salary, "
-                "'hourly' AS salary_type, '' AS employee_group, '' AS project_number, '' AS customer, "
+                "'hourly' AS salary_type, '' AS employee_group, '' AS project_number, '' AS contract_number, '' AS customer, "
                 "'' AS contract_type, '' AS object_type, '' AS object_subtype, '' AS signed_date, "
                 "'' AS due_date, '' AS object_status"
             )
@@ -213,6 +224,7 @@ class DirectoryRepository:
                     salary_type=row["salary_type"] or "hourly",
                     group=row["employee_group"] or "",
                     project_number=row["project_number"] or "",
+                    contract_number=row["contract_number"] or "",
                     customer=row["customer"] or "",
                     contract_type=row["contract_type"] or "",
                     object_type=row["object_type"] or "",
@@ -324,6 +336,7 @@ class DirectoryRepository:
         item_id: int,
         name: str,
         project_number: str,
+        contract_number: str,
         customer: str,
         contract_type: str,
         object_type: str,
@@ -341,6 +354,7 @@ class DirectoryRepository:
                 UPDATE Objects
                 SET name = ?,
                     project_number = ?,
+                    contract_number = ?,
                     customer = ?,
                     contract_type = ?,
                     object_type = ?,
@@ -353,6 +367,7 @@ class DirectoryRepository:
                 (
                     normalized,
                     project_number.strip(),
+                    contract_number.strip(),
                     customer.strip(),
                     contract_type.strip(),
                     object_type.strip(),
@@ -434,6 +449,86 @@ class DirectoryRepository:
     def delete_calendar_day(self, item_id: int) -> None:
         with self.database.connect() as connection:
             connection.execute("DELETE FROM WorkCalendarDays WHERE id = ?", (item_id,))
+
+    def list_products(self, active_only: bool = False) -> list[ProductItem]:
+        sql = """
+            SELECT
+                p.*,
+                o.name AS object_name
+            FROM Products p
+            JOIN Objects o ON o.id = p.object_id
+        """
+        if active_only:
+            sql += " WHERE p.is_active = 1"
+        sql += " ORDER BY o.name COLLATE NOCASE, p.name COLLATE NOCASE, p.serial_number COLLATE NOCASE"
+        with self.database.connect() as connection:
+            return [_map_product(row) for row in connection.execute(sql)]
+
+    def save_product(self, product: ProductItem) -> int:
+        if product.object_id is None:
+            raise ValueError("Выберите объект для изделия")
+        if not product.name.strip():
+            raise ValueError("Укажите наименование изделия")
+        readiness = max(0, min(100, int(product.readiness_percent or 0)))
+        with self.database.connect() as connection:
+            if product.id:
+                connection.execute(
+                    """
+                    UPDATE Products
+                    SET object_id = ?,
+                        serial_number = ?,
+                        name = ?,
+                        code = ?,
+                        product_status = ?,
+                        readiness_percent = ?,
+                        start_date = ?,
+                        release_date = ?,
+                        is_active = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        product.object_id,
+                        product.serial_number.strip(),
+                        product.name.strip(),
+                        product.code.strip(),
+                        _normalize_product_status(product.product_status),
+                        readiness,
+                        product.start_date.strip(),
+                        product.release_date.strip(),
+                        int(product.is_active),
+                        product.id,
+                    ),
+                )
+                return product.id
+            cursor = connection.execute(
+                """
+                INSERT INTO Products (
+                    object_id, serial_number, name, code, product_status,
+                    readiness_percent, start_date, release_date, is_active
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    product.object_id,
+                    product.serial_number.strip(),
+                    product.name.strip(),
+                    product.code.strip(),
+                    _normalize_product_status(product.product_status),
+                    readiness,
+                    product.start_date.strip(),
+                    product.release_date.strip(),
+                    int(product.is_active),
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def set_product_active(self, product_id: int, is_active: bool) -> None:
+        with self.database.connect() as connection:
+            connection.execute("UPDATE Products SET is_active = ? WHERE id = ?", (int(is_active), product_id))
+
+    def delete_product(self, product_id: int) -> None:
+        with self.database.connect() as connection:
+            connection.execute("DELETE FROM Products WHERE id = ?", (product_id,))
 
     def list_pay_rates(self) -> list[PayRate]:
         with self.database.connect() as connection:
@@ -816,6 +911,7 @@ CREATE TABLE IF NOT EXISTS Objects (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     project_number TEXT NOT NULL DEFAULT '',
+    contract_number TEXT NOT NULL DEFAULT '',
     customer TEXT NOT NULL DEFAULT '',
     contract_type TEXT NOT NULL DEFAULT '',
     object_type TEXT NOT NULL DEFAULT '',
@@ -823,6 +919,19 @@ CREATE TABLE IF NOT EXISTS Objects (
     signed_date TEXT NOT NULL DEFAULT '',
     due_date TEXT NOT NULL DEFAULT '',
     object_status TEXT NOT NULL DEFAULT 'В работе',
+    is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS Products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id INTEGER NOT NULL REFERENCES Objects(id),
+    serial_number TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    product_status TEXT NOT NULL DEFAULT 'В изготовлении',
+    readiness_percent INTEGER NOT NULL DEFAULT 0,
+    start_date TEXT NOT NULL DEFAULT '',
+    release_date TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
@@ -927,6 +1036,7 @@ CREATE TABLE IF NOT EXISTS Settings (
 CREATE INDEX IF NOT EXISTS idx_worklog_employee_date ON WorkLogEntries(employee_id, work_date);
 CREATE INDEX IF NOT EXISTS idx_worklog_date ON WorkLogEntries(work_date);
 CREATE INDEX IF NOT EXISTS idx_payrates_position ON PayRates(position_id);
+CREATE INDEX IF NOT EXISTS idx_products_object ON Products(object_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON ImportRows(batch_id);
 CREATE INDEX IF NOT EXISTS idx_work_calendar_date ON WorkCalendarDays(work_date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_completed_hash
@@ -969,6 +1079,11 @@ def _normalize_object_status(value: str) -> str:
     return value.strip() if value.strip() in allowed else ObjectStatus.IN_PROGRESS.value
 
 
+def _normalize_product_status(value: str) -> str:
+    allowed = {status.value for status in ProductStatus}
+    return value.strip() if value.strip() in allowed else ProductStatus.IN_PROGRESS.value
+
+
 def _normalize_day_type(value: str) -> str:
     allowed = {day_type.value for day_type in WorkDayType}
     return value.strip() if value.strip() in allowed else WorkDayType.WORKDAY.value
@@ -980,4 +1095,20 @@ def _map_calendar_day(row: sqlite3.Row) -> WorkCalendarDay:
         work_date=date.fromisoformat(row["work_date"]),
         day_type=_normalize_day_type(row["day_type"] or ""),
         note=row["note"] or "",
+    )
+
+
+def _map_product(row: sqlite3.Row) -> ProductItem:
+    return ProductItem(
+        id=row["id"],
+        object_id=row["object_id"],
+        object_name=row["object_name"] or "",
+        serial_number=row["serial_number"] or "",
+        name=row["name"] or "",
+        code=row["code"] or "",
+        product_status=_normalize_product_status(row["product_status"] or ""),
+        readiness_percent=int(row["readiness_percent"] or 0),
+        start_date=row["start_date"] or "",
+        release_date=row["release_date"] or "",
+        is_active=bool(row["is_active"]),
     )
