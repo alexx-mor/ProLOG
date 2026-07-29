@@ -8,7 +8,7 @@ from analytics import AnalyticsResult, build_analytics
 from category_rules import category_values_from_rule, normalize_employee_category
 from directory_files import load_position_category_map
 from database import DirectoryRepository, EmployeeRepository, WorkLogRepository
-from models import Employee, WorkLogEntry
+from models import Employee, WorkCalendarDay, WorkLogEntry
 
 
 class DirectoryService:
@@ -57,6 +57,7 @@ class DirectoryService:
         object_subtype: str,
         signed_date: str,
         due_date: str,
+        object_status: str,
     ) -> None:
         self.repository.update_object_details(
             item_id,
@@ -68,10 +69,24 @@ class DirectoryService:
             object_subtype,
             signed_date,
             due_date,
+            object_status,
         )
 
     def delete(self, key: str, item_id: int) -> None:
         self.repository.delete(key, item_id)
+
+    def list_calendar_days(
+        self,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list[WorkCalendarDay]:
+        return self.repository.list_calendar_days(date_from, date_to)
+
+    def save_calendar_day(self, calendar_day: WorkCalendarDay) -> int:
+        return self.repository.save_calendar_day(calendar_day)
+
+    def delete_calendar_day(self, item_id: int) -> None:
+        self.repository.delete_calendar_day(item_id)
 
     def list_pay_rates(self):
         return self.repository.list_pay_rates()
@@ -280,6 +295,7 @@ class AnalyticsService:
             entries=entries,
             employees=self.employees.list(),
             pay_rates=self.directories.list_pay_rates(),
+            calendar_days=self.directories.list_calendar_days(date_from, date_to),
             monthly_hours_norm=monthly_hours_norm,
         )
 

@@ -16,6 +16,22 @@ class EmployeeStatus(StrEnum):
     INACTIVE = "Неактивен"
 
 
+class ObjectStatus(StrEnum):
+    PLANNED = "Планируется"
+    IN_PROGRESS = "В работе"
+    PAUSED = "Приостановлен"
+    DELIVERED = "Сдан"
+    CLOSED = "Закрыт"
+
+
+class WorkDayType(StrEnum):
+    WORKDAY = "Рабочий день"
+    DAY_OFF = "Выходной"
+    HOLIDAY = "Праздничный день"
+    WORKING_SATURDAY = "Рабочая суббота"
+    WORKING_HOLIDAY = "Рабочий воскр./праздник"
+
+
 @dataclass(slots=True)
 class Employee:
     full_name: str
@@ -42,6 +58,7 @@ class DirectoryItem:
     object_subtype: str = ""
     signed_date: str = ""
     due_date: str = ""
+    object_status: str = ObjectStatus.IN_PROGRESS.value
 
 
 @dataclass(slots=True)
@@ -55,6 +72,14 @@ class PayRate:
     near_trip_coeff: str = "1"
     holiday_coeff: str = "1"
     saturday_coeff: str = "1"
+    id: int | None = None
+
+
+@dataclass(slots=True)
+class WorkCalendarDay:
+    work_date: date
+    day_type: str = WorkDayType.WORKDAY.value
+    note: str = ""
     id: int | None = None
 
 

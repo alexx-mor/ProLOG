@@ -1,5 +1,28 @@
 ﻿# Changelog
 
+## 2026-07-29 - Calendar, analytics and object lifecycle
+
+### Added
+
+- Added a work-time calendar directory for configured working days, days off, holidays, working Saturdays and working Sundays/holidays.
+- Added object lifecycle status: planned, in progress, paused, delivered and closed.
+- Added object status editing to the object card and object directory table.
+- Added date-based analytics alongside object, employee and work-type analytics.
+- Added calendar-aware payroll calculations for working Saturdays and holidays.
+
+### Changed
+
+- Analytics payroll now uses calendar day type before falling back to weekend detection.
+- Help now mentions the work-time calendar and analytics workflow.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- SQLite schema smoke test passed for `Objects`, `PayRates` and `WorkCalendarDays`.
+- Payroll smoke test passed for working Saturday coefficient calculation.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-10 - Import progress and compact about dialog
 
 ### Added

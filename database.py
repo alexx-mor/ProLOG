@@ -19,7 +19,7 @@ from directory_files import (
     load_position_seed_map,
     load_positions,
 )
-from models import DirectoryItem, Employee, PayRate, WorkLogEntry
+from models import DirectoryItem, Employee, ObjectStatus, PayRate, WorkCalendarDay, WorkDayType, WorkLogEntry
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,7 @@ class Database:
             "object_subtype": "",
             "signed_date": "",
             "due_date": "",
+            "object_status": ObjectStatus.IN_PROGRESS.value,
         }
         for column, default in object_defaults.items():
             if column not in object_columns:
@@ -182,19 +183,20 @@ class DirectoryRepository:
             fields = (
                 "id, name, is_active, category, student_allowed, salary, salary_type, employee_group, "
                 "'' AS project_number, '' AS customer, '' AS contract_type, '' AS object_type, "
-                "'' AS object_subtype, '' AS signed_date, '' AS due_date"
+                "'' AS object_subtype, '' AS signed_date, '' AS due_date, '' AS object_status"
             )
         elif table_key == "objects":
             fields = (
                 "id, name, is_active, '' AS category, 0 AS student_allowed, '' AS salary, "
                 "'hourly' AS salary_type, '' AS employee_group, project_number, customer, "
-                "contract_type, object_type, object_subtype, signed_date, due_date"
+                "contract_type, object_type, object_subtype, signed_date, due_date, object_status"
             )
         else:
             fields = (
                 "id, name, is_active, '' AS category, 0 AS student_allowed, '' AS salary, "
                 "'hourly' AS salary_type, '' AS employee_group, '' AS project_number, '' AS customer, "
-                "'' AS contract_type, '' AS object_type, '' AS object_subtype, '' AS signed_date, '' AS due_date"
+                "'' AS contract_type, '' AS object_type, '' AS object_subtype, '' AS signed_date, "
+                "'' AS due_date, '' AS object_status"
             )
         sql = f"SELECT {fields} FROM {table}"
         if active_only:
@@ -217,6 +219,7 @@ class DirectoryRepository:
                     object_subtype=row["object_subtype"] or "",
                     signed_date=row["signed_date"] or "",
                     due_date=row["due_date"] or "",
+                    object_status=row["object_status"] or ObjectStatus.IN_PROGRESS.value,
                 )
                 for row in connection.execute(sql)
             ]
@@ -327,6 +330,7 @@ class DirectoryRepository:
         object_subtype: str,
         signed_date: str,
         due_date: str,
+        object_status: str,
     ) -> None:
         normalized = name.strip()
         if not normalized:
@@ -342,7 +346,8 @@ class DirectoryRepository:
                     object_type = ?,
                     object_subtype = ?,
                     signed_date = ?,
-                    due_date = ?
+                    due_date = ?,
+                    object_status = ?
                 WHERE id = ?
                 """,
                 (
@@ -354,9 +359,81 @@ class DirectoryRepository:
                     object_subtype.strip(),
                     signed_date.strip(),
                     due_date.strip(),
+                    _normalize_object_status(object_status),
                     item_id,
                 ),
             )
+
+    def list_calendar_days(
+        self,
+        date_from: date | None = None,
+        date_to: date | None = None,
+    ) -> list[WorkCalendarDay]:
+        sql = "SELECT id, work_date, day_type, note FROM WorkCalendarDays"
+        conditions: list[str] = []
+        params: list[object] = []
+        if date_from:
+            conditions.append("work_date >= ?")
+            params.append(date_from.isoformat())
+        if date_to:
+            conditions.append("work_date <= ?")
+            params.append(date_to.isoformat())
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY work_date"
+        with self.database.connect() as connection:
+            return [_map_calendar_day(row) for row in connection.execute(sql, params)]
+
+    def save_calendar_day(self, calendar_day: WorkCalendarDay) -> int:
+        with self.database.connect() as connection:
+            if calendar_day.id:
+                duplicate = connection.execute(
+                    """
+                    SELECT id
+                    FROM WorkCalendarDays
+                    WHERE work_date = ? AND id <> ?
+                    """,
+                    (calendar_day.work_date.isoformat(), calendar_day.id),
+                ).fetchone()
+                if duplicate:
+                    raise ValueError("Для выбранной даты уже есть настройка календаря")
+                connection.execute(
+                    """
+                    UPDATE WorkCalendarDays
+                    SET work_date = ?, day_type = ?, note = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        calendar_day.work_date.isoformat(),
+                        _normalize_day_type(calendar_day.day_type),
+                        calendar_day.note.strip(),
+                        calendar_day.id,
+                    ),
+                )
+                return calendar_day.id
+            cursor = connection.execute(
+                """
+                INSERT INTO WorkCalendarDays (work_date, day_type, note)
+                VALUES (?, ?, ?)
+                ON CONFLICT(work_date) DO UPDATE SET
+                    day_type = excluded.day_type,
+                    note = excluded.note
+                """,
+                (
+                    calendar_day.work_date.isoformat(),
+                    _normalize_day_type(calendar_day.day_type),
+                    calendar_day.note.strip(),
+                ),
+            )
+            row = connection.execute(
+                "SELECT id FROM WorkCalendarDays WHERE work_date = ?",
+                (calendar_day.work_date.isoformat(),),
+            ).fetchone()
+            return int(row["id"] if row else cursor.lastrowid)
+
+    def delete_calendar_day(self, item_id: int) -> None:
+        with self.database.connect() as connection:
+            connection.execute("DELETE FROM WorkCalendarDays WHERE id = ?", (item_id,))
 
     def list_pay_rates(self) -> list[PayRate]:
         with self.database.connect() as connection:
@@ -745,6 +822,7 @@ CREATE TABLE IF NOT EXISTS Objects (
     object_subtype TEXT NOT NULL DEFAULT '',
     signed_date TEXT NOT NULL DEFAULT '',
     due_date TEXT NOT NULL DEFAULT '',
+    object_status TEXT NOT NULL DEFAULT 'В работе',
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
@@ -834,6 +912,13 @@ CREATE TABLE IF NOT EXISTS ImportRows (
     worklog_entry_id INTEGER REFERENCES WorkLogEntries(id)
 );
 
+CREATE TABLE IF NOT EXISTS WorkCalendarDays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_date TEXT NOT NULL UNIQUE,
+    day_type TEXT NOT NULL DEFAULT 'Рабочий день',
+    note TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS Settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -843,6 +928,7 @@ CREATE INDEX IF NOT EXISTS idx_worklog_employee_date ON WorkLogEntries(employee_
 CREATE INDEX IF NOT EXISTS idx_worklog_date ON WorkLogEntries(work_date);
 CREATE INDEX IF NOT EXISTS idx_payrates_position ON PayRates(position_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON ImportRows(batch_id);
+CREATE INDEX IF NOT EXISTS idx_work_calendar_date ON WorkCalendarDays(work_date);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_completed_hash
     ON ImportBatches(source_file_hash)
     WHERE status = 'completed';
@@ -876,3 +962,22 @@ def _normalize_salary_type(value: str) -> str:
 def _normalize_coefficient(value: str) -> str:
     normalized = value.strip().replace(",", ".")
     return normalized or "1"
+
+
+def _normalize_object_status(value: str) -> str:
+    allowed = {status.value for status in ObjectStatus}
+    return value.strip() if value.strip() in allowed else ObjectStatus.IN_PROGRESS.value
+
+
+def _normalize_day_type(value: str) -> str:
+    allowed = {day_type.value for day_type in WorkDayType}
+    return value.strip() if value.strip() in allowed else WorkDayType.WORKDAY.value
+
+
+def _map_calendar_day(row: sqlite3.Row) -> WorkCalendarDay:
+    return WorkCalendarDay(
+        id=row["id"],
+        work_date=date.fromisoformat(row["work_date"]),
+        day_type=_normalize_day_type(row["day_type"] or ""),
+        note=row["note"] or "",
+    )

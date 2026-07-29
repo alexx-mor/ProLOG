@@ -53,6 +53,7 @@ class AnalyticsWidget(QWidget):
         self.object_table = QTableWidget(0, 6)
         self.employee_table = QTableWidget(0, 7)
         self.work_type_table = QTableWidget(0, 5)
+        self.date_table = QTableWidget(0, 6)
         self._setup_controls()
         self._build_layout()
         self._connect()
@@ -101,6 +102,7 @@ class AnalyticsWidget(QWidget):
         self._fill_object_table(result)
         self._fill_employee_table(result)
         self._fill_work_type_table(result)
+        self._fill_date_table(result)
 
     def _setup_controls(self) -> None:
         for combo in (self.employee, self.object):
@@ -117,7 +119,8 @@ class AnalyticsWidget(QWidget):
             ["Сотрудник", "Должность", "Категория", "Объектов", "Записей", "Часы", "Зарплата"]
         )
         self.work_type_table.setHorizontalHeaderLabels(["Вид работ", "Сотрудников", "Записей", "Часы", "Зарплата"])
-        for table in (self.object_table, self.employee_table, self.work_type_table):
+        self.date_table.setHorizontalHeaderLabels(["Дата", "Тип дня", "Сотрудников", "Записей", "Часы", "Зарплата"])
+        for table in (self.object_table, self.employee_table, self.work_type_table, self.date_table):
             table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
             table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
             table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -162,6 +165,7 @@ class AnalyticsWidget(QWidget):
         tables.addTab(self.object_table, "По объектам")
         tables.addTab(self.employee_table, "По сотрудникам")
         tables.addTab(self.work_type_table, "По видам работ")
+        tables.addTab(self.date_table, "По датам")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -226,6 +230,19 @@ class AnalyticsWidget(QWidget):
             ]
             self._set_row(self.work_type_table, row, values)
 
+    def _fill_date_table(self, result: AnalyticsResult) -> None:
+        self.date_table.setRowCount(len(result.by_date))
+        for row, item in enumerate(result.by_date):
+            values = [
+                item.work_date,
+                item.day_type,
+                item.employees_count,
+                item.entries_count,
+                item.total_hours,
+                format_money(item.payroll),
+            ]
+            self._set_row(self.date_table, row, values)
+
     def _set_row(self, table: QTableWidget, row: int, values: list[object]) -> None:
         for column, value in enumerate(values):
             text = str(value)
@@ -242,6 +259,7 @@ class AnalyticsWidget(QWidget):
             (self.object_table, [240, 110, 90, 80, 100, 140]),
             (self.employee_table, [220, 180, 85, 85, 85, 75, 140]),
             (self.work_type_table, [260, 110, 90, 80, 140]),
+            (self.date_table, [100, 190, 110, 90, 80, 140]),
         ):
             for column, width in enumerate(widths):
                 table.setColumnWidth(column, width)

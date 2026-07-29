@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import webbrowser
+from datetime import date
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
@@ -31,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from constants import APP_LOGO_FILE, APP_NAME, APP_VERSION
 from directory_files import dictionary_statuses, merge_dictionary_updates
-from models import AppSettings, DirectoryItem, Employee, PayRate
+from models import AppSettings, DirectoryItem, Employee, ObjectStatus, PayRate, WorkCalendarDay, WorkDayType
 from requisites import RequisitesOptions
 from services import category_values_from_rule
 from update_checker import UpdateChecker
@@ -279,6 +280,8 @@ class ObjectDialog(QDialog):
         self.name = QLineEdit(item.name if item else "")
         self.project_number = QLineEdit(item.project_number if item else "")
         self.customer = QLineEdit(item.customer if item else "")
+        self.object_status = QComboBox()
+        self.object_status.addItems([status.value for status in ObjectStatus])
         self.contract_type = QComboBox()
         self.contract_type.addItems(self.CONTRACT_TYPES)
         self.object_type = QComboBox()
@@ -297,6 +300,7 @@ class ObjectDialog(QDialog):
             date_edit.setMaximumDate(QDate(2100, 12, 31))
 
         if item:
+            self._set_combo_text(self.object_status, item.object_status)
             self._set_combo_text(self.contract_type, item.contract_type)
             self._set_combo_text(self.object_type, item.object_type)
         self._sync_subtypes(item.object_subtype if item else "")
@@ -321,6 +325,7 @@ class ObjectDialog(QDialog):
         layout.addRow("Общее наименование", self.name)
         layout.addRow("№ проекта/заявки", self.project_number)
         layout.addRow("Заказчик", self.customer)
+        layout.addRow("Состояние", self.object_status)
         layout.addRow("Тип", self.contract_type)
         layout.addRow("Тип объекта", self.object_type)
         layout.addRow("Подтип объекта", self.object_subtype)
@@ -335,7 +340,7 @@ class ObjectDialog(QDialog):
         self.due_date.dateChanged.connect(lambda _date: self._refresh_days_left())
         self._refresh_days_left()
 
-    def values(self) -> tuple[str, str, str, str, str, str, str, str]:
+    def values(self) -> tuple[str, str, str, str, str, str, str, str, str]:
         return (
             self.name.text().strip(),
             self.project_number.text().strip(),
@@ -345,6 +350,7 @@ class ObjectDialog(QDialog):
             self.object_subtype.currentText().strip(),
             self._date_value(self.signed_date),
             self._date_value(self.due_date),
+            self.object_status.currentText().strip(),
         )
 
     def accept(self) -> None:
@@ -399,6 +405,52 @@ class ObjectDialog(QDialog):
         box.addButton("ОК", QMessageBox.ButtonRole.AcceptRole)
         box.exec()
 
+
+class CalendarDayDialog(QDialog):
+    def __init__(self, calendar_day: WorkCalendarDay | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Календарный день")
+        self.setMinimumWidth(560)
+        self.date_edit = QDateEdit()
+        self.date_edit.setCalendarPopup(True)
+        self.date_edit.setDisplayFormat("dd.MM.yyyy")
+        self.date_edit.setMinimumDate(QDate(2000, 1, 1))
+        self.date_edit.setMaximumDate(QDate(2100, 12, 31))
+        self.day_type = QComboBox()
+        self.day_type.addItems([day_type.value for day_type in WorkDayType])
+        self.note = QLineEdit(calendar_day.note if calendar_day else "")
+        self.note.setPlaceholderText("Например: перенос рабочего дня или официальный праздник")
+        self.item_id = calendar_day.id if calendar_day else None
+
+        if calendar_day:
+            self.date_edit.setDate(QDate.fromString(calendar_day.work_date.isoformat(), "yyyy-MM-dd"))
+            index = self.day_type.findText(calendar_day.day_type)
+            self.day_type.setCurrentIndex(index if index >= 0 else 0)
+        else:
+            self.date_edit.setDate(QDate.currentDate())
+
+        save_button = QPushButton("Сохранить")
+        cancel_button = QPushButton("Отмена")
+        save_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(save_button)
+        buttons.addWidget(cancel_button)
+
+        layout = QFormLayout(self)
+        layout.addRow("Дата", self.date_edit)
+        layout.addRow("Тип дня", self.day_type)
+        layout.addRow("Примечание", self.note)
+        layout.addRow(buttons)
+
+    def value(self) -> WorkCalendarDay:
+        return WorkCalendarDay(
+            id=self.item_id,
+            work_date=self.date_edit.date().toPython(),
+            day_type=self.day_type.currentText().strip(),
+            note=self.note.text().strip(),
+        )
 
 class PayRateDialog(QDialog):
     def __init__(self, pay_rate: PayRate, parent=None) -> None:
@@ -460,6 +512,7 @@ class DirectoryDialog(QDialog):
         "objects": "Объекты",
         "positions": "Должности",
         "pay_rates": "Оплата",
+        "calendar": "Календарь рабочего времени",
         "work_types": "Виды работ",
     }
 
@@ -501,6 +554,19 @@ class DirectoryDialog(QDialog):
             ]
             self._refresh_pay_rates()
             return
+        if self.current_key == "calendar":
+            self._items = [
+                item
+                for item in self.directory_service.list_calendar_days()
+                if (
+                    not needle
+                    or needle in _display_calendar_date(item.work_date).lower()
+                    or needle in item.day_type.lower()
+                    or needle in item.note.lower()
+                )
+            ]
+            self._refresh_calendar_days()
+            return
         self._items = [item for item in self.directory_service.list_all(self.current_key) if not needle or needle in item.name.lower()]
         self.table.setRowCount(len(self._items))
         for row, item in enumerate(self._items):
@@ -522,6 +588,7 @@ class DirectoryDialog(QDialog):
                 values = [
                     item.project_number,
                     item.customer,
+                    item.object_status,
                     item.contract_type,
                     item.object_type,
                     item.object_subtype,
@@ -563,6 +630,23 @@ class DirectoryDialog(QDialog):
             self.table.setItem(row, 5, near_trip)
             self.table.setItem(row, 6, holiday)
             self.table.setItem(row, 7, saturday)
+
+    def _refresh_calendar_days(self) -> None:
+        self.table.setRowCount(len(self._items))
+        for row, item in enumerate(self._items):
+            date_cell = QTableWidgetItem(_display_calendar_date(item.work_date))
+            date_cell.setData(Qt.ItemDataRole.UserRole, item.id)
+            date_cell.setToolTip(date_cell.text())
+            day_type = QTableWidgetItem(item.day_type)
+            day_type.setToolTip(item.day_type)
+            note = QTableWidgetItem(item.note)
+            note.setToolTip(item.note)
+            payment_mode = QTableWidgetItem(_calendar_payment_mode(item.day_type))
+            payment_mode.setToolTip(payment_mode.text())
+            self.table.setItem(row, 0, date_cell)
+            self.table.setItem(row, 1, day_type)
+            self.table.setItem(row, 2, note)
+            self.table.setItem(row, 3, payment_mode)
 
     def _build_layout(self) -> None:
         header = QLabel("Справочники")
@@ -624,6 +708,11 @@ class DirectoryDialog(QDialog):
         if self.current_key == "pay_rates":
             self._info("Строки оплаты формируются автоматически из активных должностей и их категорий")
             return
+        if self.current_key == "calendar":
+            dialog = CalendarDayDialog(parent=self)
+            if dialog.exec():
+                self._save_calendar_day(dialog.value())
+            return
         if self.current_key == "positions":
             dialog = PositionDialog(parent=self)
             if dialog.exec():
@@ -672,6 +761,15 @@ class DirectoryDialog(QDialog):
                 self.directory_service.update_pay_rate(item_id, *dialog.values())
                 self.refresh()
             return
+        if self.current_key == "calendar":
+            item = self._selected_item()
+            if item is None:
+                self._info("Выберите строку")
+                return
+            dialog = CalendarDayDialog(item, self)
+            if dialog.exec():
+                self._save_calendar_day(dialog.value())
+            return
         if self.current_key == "positions":
             item = self._selected_item()
             if item is None:
@@ -712,6 +810,9 @@ class DirectoryDialog(QDialog):
         if self.current_key == "pay_rates":
             self._info("Активность оплаты управляется через справочник должностей")
             return
+        if self.current_key == "calendar":
+            self._info("У календарного дня нет признака активности. Его можно отредактировать или удалить.")
+            return
         item_id = self._selected_id()
         if item_id is None:
             self._info("Выберите строку")
@@ -719,9 +820,27 @@ class DirectoryDialog(QDialog):
         self.directory_service.set_active(self.current_key, item_id, is_active)
         self.refresh()
 
+    def _save_calendar_day(self, calendar_day: WorkCalendarDay) -> None:
+        try:
+            self.directory_service.save_calendar_day(calendar_day)
+        except ValueError as exc:
+            self._info(str(exc))
+            return
+        self.refresh()
+
     def _delete_item(self) -> None:
         if self.current_key == "pay_rates":
             self._info("Строки оплаты удаляются из списка автоматически при изменении должностей или категорий")
+            return
+        if self.current_key == "calendar":
+            item_id = self._selected_id()
+            if item_id is None:
+                self._info("Выберите строку")
+                return
+            if not self._ask(f"Удалить настройку календаря '{self._selected_name()}'?"):
+                return
+            self.directory_service.delete_calendar_day(item_id)
+            self.refresh()
             return
         item_id = self._selected_id()
         if item_id is None:
@@ -740,7 +859,7 @@ class DirectoryDialog(QDialog):
         row = self.table.currentRow()
         if row < 0 or row >= len(self._items):
             return
-        if self.current_key in {"pay_rates", "positions", "objects"}:
+        if self.current_key in {"pay_rates", "positions", "objects", "calendar"}:
             self._rename_item()
             return
         self.directory_service.set_active(self.current_key, self._items[row].id, not self._items[row].is_active)
@@ -758,6 +877,18 @@ class DirectoryDialog(QDialog):
             rename_action.setEnabled(has_item)
             rename_action.triggered.connect(self._rename_item)
             menu.addAction(rename_action)
+            menu.exec(self.table.viewport().mapToGlobal(position))
+            return
+        if self.current_key == "calendar":
+            add_action.triggered.connect(self._add_item)
+            rename_action.setEnabled(has_item)
+            rename_action.triggered.connect(self._rename_item)
+            delete_action.setEnabled(has_item)
+            delete_action.triggered.connect(self._delete_item)
+            menu.addAction(add_action)
+            menu.addAction(rename_action)
+            menu.addSeparator()
+            menu.addAction(delete_action)
             menu.exec(self.table.viewport().mapToGlobal(position))
             return
         for action in (rename_action, disable_action, restore_action, delete_action):
@@ -810,22 +941,44 @@ class DirectoryDialog(QDialog):
             self.table.setColumnWidth(6, 112)
             self.table.setColumnWidth(7, 82)
         elif self.current_key == "objects":
-            self.table.setColumnCount(9)
+            self.table.setColumnCount(10)
             self.table.setHorizontalHeaderLabels(
-                ["Объект", "№ проекта", "Заказчик", "Тип", "Тип объекта", "Подтип", "Дата окончания", "Осталось", "Статус"]
+                [
+                    "Объект",
+                    "№ проекта",
+                    "Заказчик",
+                    "Состояние",
+                    "Тип",
+                    "Тип объекта",
+                    "Подтип",
+                    "Дата окончания",
+                    "Осталось",
+                    "Статус",
+                ]
             )
             self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            for column in range(1, 9):
+            for column in range(1, 10):
                 self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(0, 260)
+            self.table.setColumnWidth(0, 230)
             self.table.setColumnWidth(1, 110)
-            self.table.setColumnWidth(2, 170)
-            self.table.setColumnWidth(3, 135)
-            self.table.setColumnWidth(4, 150)
-            self.table.setColumnWidth(5, 100)
-            self.table.setColumnWidth(6, 105)
-            self.table.setColumnWidth(7, 110)
-            self.table.setColumnWidth(8, 92)
+            self.table.setColumnWidth(2, 150)
+            self.table.setColumnWidth(3, 125)
+            self.table.setColumnWidth(4, 125)
+            self.table.setColumnWidth(5, 140)
+            self.table.setColumnWidth(6, 92)
+            self.table.setColumnWidth(7, 105)
+            self.table.setColumnWidth(8, 105)
+            self.table.setColumnWidth(9, 92)
+        elif self.current_key == "calendar":
+            self.table.setColumnCount(4)
+            self.table.setHorizontalHeaderLabels(["Дата", "Тип дня", "Примечание", "Оплата"])
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(0, 110)
+            self.table.setColumnWidth(1, 190)
+            self.table.setColumnWidth(3, 210)
         else:
             self.table.setColumnCount(2)
             self.table.setHorizontalHeaderLabels(["Название", "Статус"])
@@ -838,14 +991,15 @@ class DirectoryDialog(QDialog):
         if self.current_key == "positions":
             return 4
         if self.current_key == "objects":
-            return 8
+            return 9
         return 1
 
     def _update_button_visibility(self) -> None:
         is_pay_rates = self.current_key == "pay_rates"
+        is_calendar = self.current_key == "calendar"
         self.add_button.setVisible(not is_pay_rates)
-        self.disable_button.setVisible(not is_pay_rates)
-        self.restore_button.setVisible(not is_pay_rates)
+        self.disable_button.setVisible(not is_pay_rates and not is_calendar)
+        self.restore_button.setVisible(not is_pay_rates and not is_calendar)
         self.delete_button.setVisible(not is_pay_rates)
 
     def _info(self, message: str) -> None:
@@ -917,6 +1071,18 @@ def _days_left_display(value: str) -> str:
     if days == 0:
         return "Сегодня"
     return f"Проср. {abs(days)} дн."
+
+
+def _display_calendar_date(value: date) -> str:
+    return value.strftime("%d.%m.%Y")
+
+
+def _calendar_payment_mode(day_type: str) -> str:
+    if day_type == WorkDayType.WORKING_SATURDAY.value:
+        return "КТУ суббота"
+    if day_type in {WorkDayType.DAY_OFF.value, WorkDayType.HOLIDAY.value, WorkDayType.WORKING_HOLIDAY.value}:
+        return "КТУ воскр./празд."
+    return "Обычная ставка"
 
 
 class HelpDialog(QDialog):
@@ -1121,9 +1287,13 @@ HELP_HTML = f"""
   <li>При первом запуске пройдите первичную настройку: сотрудники, должности, виды работ и объекты.</li>
   <li>Выберите сотрудника слева и дату в рабочей области.</li>
   <li>Заполните объект, вид работ, описание, часы и комментарий.</li>
-  <li>Сохраните запись. Ниже появится список работ на выбранную дату.</li>
+  <li>Сохраните запись. Ниже появится список выполненных работ выбранного сотрудника.</li>
   <li>Используйте меню <b>Экспорт</b> для формирования отчета или сменного задания.</li>
 </ol>
+<h3>Календарь и аналитика</h3>
+<p>В меню <b>Настройки - Справочники</b> можно вести календарь рабочего времени:
+рабочие дни, выходные, праздники и рабочие субботы. Эти настройки используются
+во вкладке <b>Аналитика</b> при расчете часов и оплаты.</p>
 <h3>Импорт сотрудников</h3>
 <p>Excel-файл должен содержать колонки: №, ФИО, Должность, Категория.</p>
 <h3>Импорт старых отчетов</h3>
