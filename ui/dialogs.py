@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import webbrowser
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from PySide6.QtCore import QDate, Qt
-from PySide6.QtGui import QAction, QColor, QIcon, QIntValidator, QPainter, QPixmap
+from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QIntValidator, QPainter, QPixmap, QTextCharFormat
 from PySide6.QtWidgets import (
     QCheckBox,
+    QCalendarWidget,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -24,7 +25,9 @@ from PySide6.QtWidgets import (
     QListView,
     QMessageBox,
     QMenu,
+    QProgressDialog,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QTextBrowser,
@@ -523,9 +526,6 @@ class ProductDialog(QDialog):
         self.readiness_percent.setValidator(QIntValidator(0, 100, self))
         self.start_date = QDateEdit()
         self.release_date = QDateEdit()
-        self.status_label = QLabel()
-        self.toggle_active_button = QPushButton()
-        self.toggle_active_button.clicked.connect(self._toggle_active)
         for date_edit in (self.start_date, self.release_date):
             date_edit.setCalendarPopup(True)
             date_edit.setDisplayFormat("dd.MM.yyyy")
@@ -541,7 +541,6 @@ class ProductDialog(QDialog):
             today = QDate.currentDate()
             self.start_date.setDate(today)
             self.release_date.setDate(today)
-        self._sync_active_controls()
 
         save_button = QPushButton("Сохранить")
         cancel_button = QPushButton("Отмена")
@@ -561,8 +560,6 @@ class ProductDialog(QDialog):
         layout.addRow("Готовность, %", self.readiness_percent)
         layout.addRow("Дата начала изготовления", self.start_date)
         layout.addRow("Дата выпуска", self.release_date)
-        layout.addRow("Статус", self.status_label)
-        layout.addRow("", self.toggle_active_button)
         layout.addRow(buttons)
 
     def value(self) -> ProductItem:
@@ -588,14 +585,6 @@ class ProductDialog(QDialog):
             self._info("Укажите наименование изделия")
             return
         super().accept()
-
-    def _toggle_active(self) -> None:
-        self.is_active = not self.is_active
-        self._sync_active_controls()
-
-    def _sync_active_controls(self) -> None:
-        self.status_label.setText("Активно" if self.is_active else "Отключено")
-        self.toggle_active_button.setText("Отключить" if self.is_active else "Активировать")
 
     def _select_object(self, object_id: int) -> None:
         index = self.object.findData(object_id)
@@ -625,33 +614,31 @@ class PayRateDialog(QDialog):
     def __init__(self, group: PayRateGroup, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Оплата")
-        self.setMinimumWidth(760)
+        self.setMinimumWidth(860)
         self.group = group
-        self.position = QLineEdit(group.position_name)
-        self.position.setReadOnly(True)
         self.salary_type = QComboBox()
         self.salary_type.addItem("Ставка", "hourly")
         self.salary_type.addItem("Зарплата", "monthly")
         index = self.salary_type.findData(group.salary_type)
         self.salary_type.setCurrentIndex(index if index >= 0 else 0)
-        self.category_amounts: dict[str, QLineEdit] = {}
-        for category in PAY_CATEGORY_COLUMNS:
-            edit = QLineEdit()
-            edit.setPlaceholderText("Например: 100000")
-            rate = group.rates.get(category)
-            if rate:
-                edit.setText(rate.salary)
-            else:
-                edit.setText("—")
-                edit.setReadOnly(True)
-                edit.setEnabled(False)
-            self.category_amounts[category] = edit
+        self.category_rows = _pay_rate_row_categories(group)
+        self.table = QTableWidget(len(self.category_rows), 3)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.EditKeyPressed)
+        self.table.verticalHeader().setVisible(False)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.setColumnWidth(0, 280)
+        self.table.setColumnWidth(1, 170)
+        self._fill_amount_table()
         self.far_trip_coeff = QLineEdit(group.far_trip_coeff)
         self.near_trip_coeff = QLineEdit(group.near_trip_coeff)
         self.holiday_coeff = QLineEdit(group.holiday_coeff)
         self.saturday_coeff = QLineEdit(group.saturday_coeff)
         for coeff in (self.far_trip_coeff, self.near_trip_coeff, self.holiday_coeff, self.saturday_coeff):
             coeff.setPlaceholderText("Например: 1,5")
+        self.salary_type.currentIndexChanged.connect(self._update_amount_header)
 
         save_button = QPushButton("Сохранить")
         cancel_button = QPushButton("Отмена")
@@ -663,23 +650,44 @@ class PayRateDialog(QDialog):
         buttons.addWidget(cancel_button)
 
         layout = QFormLayout(self)
-        layout.addRow("Должность", self.position)
         layout.addRow("Тип оплаты", self.salary_type)
-        for category, edit in self.category_amounts.items():
-            layout.addRow(_pay_category_title(category), edit)
-        layout.addRow("КД (дальняя командировка)", self.far_trip_coeff)
+        layout.addRow(self.table)
+        layout.addRow("Командировка дальняя (КД)", self.far_trip_coeff)
         layout.addRow("КТУ КБ (ближняя командировка)", self.near_trip_coeff)
         layout.addRow("КТУ воскр. и праздники", self.holiday_coeff)
         layout.addRow("КТУ суббота", self.saturday_coeff)
         layout.addRow(buttons)
 
+    def _fill_amount_table(self) -> None:
+        self._update_amount_header()
+        for row, category in enumerate(self.category_rows):
+            position = QTableWidgetItem(self.group.position_name if row == 0 else "")
+            position.setFlags(position.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            position.setToolTip(self.group.position_name)
+            category_item = QTableWidgetItem(_pay_category_row_title(category))
+            category_item.setFlags(category_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            category_item.setToolTip(category_item.text())
+            amount_item = QTableWidgetItem(self.group.rates[category].salary)
+            amount_item.setToolTip(amount_item.text())
+            self.table.setItem(row, 0, position)
+            self.table.setItem(row, 1, category_item)
+            self.table.setItem(row, 2, amount_item)
+            for column in range(self.table.columnCount()):
+                self.table.item(row, column).setBackground(QColor("#eaf4fb" if row % 2 == 0 else "#fff2e8"))
+        if len(self.category_rows) > 1:
+            self.table.setSpan(0, 0, len(self.category_rows), 1)
+        self.table.resizeRowsToContents()
+
+    def _update_amount_header(self) -> None:
+        amount_header = "Зарплата" if self.salary_type.currentData() == "monthly" else "Ставка"
+        self.table.setHorizontalHeaderLabels(["Должность", "Разряд", amount_header])
+
     def values(self) -> tuple[str, dict[str, str], str, str, str, str]:
         return (
             str(self.salary_type.currentData() or "hourly"),
             {
-                category: edit.text().strip()
-                for category, edit in self.category_amounts.items()
-                if category in self.group.rates
+                category: (self.table.item(row, 2).text().strip() if self.table.item(row, 2) else "")
+                for row, category in enumerate(self.category_rows)
             },
             self.far_trip_coeff.text().strip(),
             self.near_trip_coeff.text().strip(),
@@ -713,6 +721,27 @@ class DirectoryDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.product_filter_panel = QWidget()
+        self.product_object_filter = QComboBox()
+        self.product_object_filter.setView(QListView())
+        self.calendar_panel = QWidget()
+        self.calendar_year = QSpinBox()
+        self.calendar_year.setRange(2000, 2100)
+        self.calendar_year.setValue(QDate.currentDate().year())
+        self.calendar_widget = QCalendarWidget()
+        self.calendar_widget.setGridVisible(True)
+        self.calendar_widget.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
+        self.calendar_widget.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        self.calendar_day_label = QLabel()
+        self.calendar_day_type = QComboBox()
+        self.calendar_day_type.addItems([day_type.value for day_type in WorkDayType])
+        self.calendar_note = QLineEdit()
+        self.calendar_note.setPlaceholderText("Примечание к выбранной дате")
+        self.calendar_save_button = QPushButton("Сохранить дату")
+        self.calendar_delete_button = QPushButton("Удалить дату")
+        self.calendar_import_button = QPushButton("Загрузить год")
+        self._calendar_days_by_date: dict[date, WorkCalendarDay] = {}
+        self._calendar_formatted_dates: set[date] = set()
         self.add_button = QPushButton("Добавить")
         self.rename_button = QPushButton("Редактировать")
         self.disable_button = QPushButton("Отключить")
@@ -728,44 +757,41 @@ class DirectoryDialog(QDialog):
     def refresh(self) -> None:
         self._configure_table()
         self._update_button_visibility()
-        needle = self.search.text().strip().lower()
+        needle = self.search.text().strip().casefold()
         if self.current_key == "pay_rates":
             self._items = [
                 item
                 for item in _pay_rate_groups(self.directory_service.list_pay_rates())
-                if not needle or needle in item.position_name.lower()
+                if not needle or needle in item.position_name.casefold()
             ]
             self._refresh_pay_rates()
             return
         if self.current_key == "calendar":
-            self._items = [
-                item
-                for item in self.directory_service.list_calendar_days()
-                if (
-                    not needle
-                    or needle in _display_calendar_date(item.work_date).lower()
-                    or needle in item.day_type.lower()
-                    or needle in item.note.lower()
-                )
-            ]
-            self._refresh_calendar_days()
+            year = self.calendar_year.value()
+            self._items = self.directory_service.list_calendar_days(date(year, 1, 1), date(year, 12, 31))
+            self._refresh_calendar_view()
             return
         if self.current_key == "products":
+            self._populate_product_object_filter()
+            selected_object_id = self.product_object_filter.currentData()
             self._items = [
                 item
                 for item in self.directory_service.list_products()
                 if (
+                    (selected_object_id is None or item.object_id == selected_object_id)
+                    and (
                     not needle
-                    or needle in item.object_name.lower()
-                    or needle in item.serial_number.lower()
-                    or needle in item.name.lower()
-                    or needle in item.code.lower()
-                    or needle in item.product_status.lower()
+                    or needle in item.object_name.casefold()
+                    or needle in item.serial_number.casefold()
+                    or needle in item.name.casefold()
+                    or needle in item.code.casefold()
+                    or needle in item.product_status.casefold()
+                    )
                 )
             ]
             self._refresh_products()
             return
-        self._items = [item for item in self.directory_service.list_all(self.current_key) if not needle or needle in item.name.lower()]
+        self._items = [item for item in self.directory_service.list_all(self.current_key) if not needle or needle in item.name.casefold()]
         self.table.setRowCount(len(self._items))
         for row, item in enumerate(self._items):
             name = QTableWidgetItem(item.name)
@@ -848,6 +874,28 @@ class DirectoryDialog(QDialog):
             self.table.setItem(row, 2, note)
             self.table.setItem(row, 3, payment_mode)
 
+    def _refresh_calendar_view(self) -> None:
+        self._calendar_days_by_date = {item.work_date: item for item in self._items}
+        self._apply_calendar_formats()
+        self._sync_calendar_selection()
+
+    def _apply_calendar_formats(self) -> None:
+        empty_format = QTextCharFormat()
+        for work_date in self._calendar_formatted_dates:
+            self.calendar_widget.setDateTextFormat(_date_to_qdate(work_date), empty_format)
+        self._calendar_formatted_dates.clear()
+
+        year = self.calendar_year.value()
+        current = date(year, 1, 1)
+        end = date(year, 12, 31)
+        while current <= end:
+            calendar_day = self._calendar_days_by_date.get(current)
+            day_type = calendar_day.day_type if calendar_day else _default_calendar_day_type(current)
+            if day_type != WorkDayType.WORKDAY.value:
+                self.calendar_widget.setDateTextFormat(_date_to_qdate(current), _calendar_date_format(day_type))
+                self._calendar_formatted_dates.add(current)
+            current += timedelta(days=1)
+
     def _refresh_products(self) -> None:
         self.table.setRowCount(len(self._items))
         for row, item in enumerate(self._items):
@@ -872,9 +920,117 @@ class DirectoryDialog(QDialog):
             if not item.is_active:
                 self._mark_disabled_row(row)
 
+    def _populate_product_object_filter(self) -> None:
+        current_id = self.product_object_filter.currentData()
+        self.product_object_filter.blockSignals(True)
+        self.product_object_filter.clear()
+        self.product_object_filter.addItem("Все объекты", None)
+        for item in self.directory_service.list_all("objects"):
+            self.product_object_filter.addItem(item.name, item.id)
+        if current_id is not None:
+            index = self.product_object_filter.findData(current_id)
+            self.product_object_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.product_object_filter.blockSignals(False)
+
+    def _calendar_year_changed(self, year: int) -> None:
+        selected = self.calendar_widget.selectedDate()
+        month_date = QDate(year, selected.month(), 1)
+        day = min(selected.day(), month_date.daysInMonth())
+        self.calendar_widget.setSelectedDate(QDate(year, selected.month(), day))
+        self.refresh()
+
+    def _calendar_page_changed(self, year: int, _month: int) -> None:
+        if self.calendar_year.value() == year:
+            return
+        self.calendar_year.blockSignals(True)
+        self.calendar_year.setValue(year)
+        self.calendar_year.blockSignals(False)
+        self.refresh()
+
+    def _sync_calendar_selection(self) -> None:
+        selected = _qdate_to_date(self.calendar_widget.selectedDate())
+        calendar_day = self._calendar_days_by_date.get(selected)
+        self.calendar_day_label.setText(_display_calendar_date(selected))
+        day_type = calendar_day.day_type if calendar_day else _default_calendar_day_type(selected)
+        note = calendar_day.note if calendar_day else ""
+        self.calendar_day_type.blockSignals(True)
+        index = self.calendar_day_type.findText(day_type)
+        self.calendar_day_type.setCurrentIndex(index if index >= 0 else 0)
+        self.calendar_day_type.blockSignals(False)
+        self.calendar_note.setText(note)
+
+    def _save_selected_calendar_day(self) -> None:
+        selected = _qdate_to_date(self.calendar_widget.selectedDate())
+        calendar_day = self._calendar_days_by_date.get(selected)
+        self._save_calendar_day(
+            WorkCalendarDay(
+                id=calendar_day.id if calendar_day else None,
+                work_date=selected,
+                day_type=self.calendar_day_type.currentText().strip(),
+                note=self.calendar_note.text().strip(),
+            )
+        )
+
+    def _delete_selected_calendar_day(self) -> None:
+        selected = _qdate_to_date(self.calendar_widget.selectedDate())
+        calendar_day = self._calendar_days_by_date.get(selected)
+        if not calendar_day or calendar_day.id is None:
+            self._info("Для выбранной даты нет сохраненной настройки")
+            return
+        if not self._ask(f"Удалить настройку календаря за {self.calendar_day_label.text()}?"):
+            return
+        self.directory_service.delete_calendar_day(calendar_day.id)
+        self.refresh()
+
+    def _import_calendar_year(self) -> None:
+        year = self.calendar_year.value()
+        progress = QProgressDialog(f"Загружаю производственный календарь за {year} год...", "", 0, 0, self)
+        progress.setWindowTitle("Производственный календарь")
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.show()
+        progress.repaint()
+        try:
+            imported_count = self.directory_service.import_production_calendar(year)
+        except Exception as exc:
+            progress.close()
+            self._info(str(exc))
+            return
+        progress.close()
+        self.refresh()
+        self._info(f"Загружено дней: {imported_count}")
+
     def _build_layout(self) -> None:
         header = QLabel("Справочники")
         header.setObjectName("DialogTitle")
+        product_filter_layout = QHBoxLayout(self.product_filter_panel)
+        product_filter_layout.setContentsMargins(0, 0, 0, 0)
+        product_filter_layout.addWidget(QLabel("Объект"))
+        product_filter_layout.addWidget(self.product_object_filter)
+        product_filter_layout.addStretch()
+
+        calendar_top = QHBoxLayout()
+        calendar_top.addWidget(QLabel("Год"))
+        calendar_top.addWidget(self.calendar_year)
+        calendar_top.addWidget(self.calendar_import_button)
+        calendar_top.addStretch()
+
+        calendar_editor = QFormLayout()
+        calendar_editor.addRow("Дата", self.calendar_day_label)
+        calendar_editor.addRow("Тип дня", self.calendar_day_type)
+        calendar_editor.addRow("Примечание", self.calendar_note)
+        calendar_buttons = QHBoxLayout()
+        calendar_buttons.addStretch()
+        calendar_buttons.addWidget(self.calendar_save_button)
+        calendar_buttons.addWidget(self.calendar_delete_button)
+
+        calendar_layout = QVBoxLayout(self.calendar_panel)
+        calendar_layout.setContentsMargins(0, 0, 0, 0)
+        calendar_layout.addLayout(calendar_top)
+        calendar_layout.addWidget(self.calendar_widget)
+        calendar_layout.addLayout(calendar_editor)
+        calendar_layout.addLayout(calendar_buttons)
+
         buttons = QHBoxLayout()
         for button in (self.add_button, self.rename_button, self.disable_button, self.restore_button, self.delete_button):
             buttons.addWidget(button)
@@ -883,7 +1039,9 @@ class DirectoryDialog(QDialog):
         right = QVBoxLayout()
         right.addWidget(header)
         right.addWidget(self.search)
+        right.addWidget(self.product_filter_panel)
         right.addWidget(self.table)
+        right.addWidget(self.calendar_panel)
         right.addLayout(buttons)
         content = QHBoxLayout(self)
         content.addWidget(self.navigation)
@@ -900,6 +1058,13 @@ class DirectoryDialog(QDialog):
         self.close_button.clicked.connect(self.accept)
         self.table.doubleClicked.connect(self._toggle_selected_active)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
+        self.product_object_filter.currentIndexChanged.connect(self.refresh)
+        self.calendar_year.valueChanged.connect(self._calendar_year_changed)
+        self.calendar_widget.selectionChanged.connect(self._sync_calendar_selection)
+        self.calendar_widget.currentPageChanged.connect(self._calendar_page_changed)
+        self.calendar_save_button.clicked.connect(self._save_selected_calendar_day)
+        self.calendar_delete_button.clicked.connect(self._delete_selected_calendar_day)
+        self.calendar_import_button.clicked.connect(self._import_calendar_year)
 
     def _fill_navigation(self) -> None:
         for label in self.DIRECTORY_LABELS.values():
@@ -1147,11 +1312,7 @@ class DirectoryDialog(QDialog):
         row = self.table.currentRow()
         if row < 0 or row >= len(self._items):
             return
-        if self.current_key in {"pay_rates", "positions", "objects", "calendar", "products"}:
-            self._rename_item()
-            return
-        self.directory_service.set_active(self.current_key, self._items[row].id, not self._items[row].is_active)
-        self.refresh()
+        self._rename_item()
 
     def _show_context_menu(self, position) -> None:
         menu = QMenu(self)
@@ -1219,7 +1380,7 @@ class DirectoryDialog(QDialog):
                     "Категория 1",
                     "Категория 2",
                     "Категория 3",
-                    "КД",
+                    "Командировка дальняя (КД)",
                     "КТУ КБ",
                     "Воскр./празд.",
                     "Суббота",
@@ -1232,7 +1393,7 @@ class DirectoryDialog(QDialog):
             self.table.setColumnWidth(1, 82)
             for column in range(2, 6):
                 self.table.setColumnWidth(column, 118)
-            self.table.setColumnWidth(6, 64)
+            self.table.setColumnWidth(6, 210)
             self.table.setColumnWidth(7, 78)
             self.table.setColumnWidth(8, 112)
             self.table.setColumnWidth(9, 82)
@@ -1315,10 +1476,16 @@ class DirectoryDialog(QDialog):
     def _update_button_visibility(self) -> None:
         is_pay_rates = self.current_key == "pay_rates"
         is_calendar = self.current_key == "calendar"
-        self.add_button.setVisible(not is_pay_rates)
+        is_products = self.current_key == "products"
+        self.search.setVisible(not is_calendar)
+        self.table.setVisible(not is_calendar)
+        self.calendar_panel.setVisible(is_calendar)
+        self.product_filter_panel.setVisible(is_products)
+        self.add_button.setVisible(not is_pay_rates and not is_calendar)
+        self.rename_button.setVisible(not is_calendar)
         self.disable_button.setVisible(not is_pay_rates and not is_calendar)
         self.restore_button.setVisible(not is_pay_rates and not is_calendar)
-        self.delete_button.setVisible(not is_pay_rates)
+        self.delete_button.setVisible(not is_pay_rates and not is_calendar)
 
     def _info(self, message: str) -> None:
         box = QMessageBox(self)
@@ -1382,12 +1549,27 @@ def _pay_rate_groups(rates: list[PayRate]) -> list[PayRateGroup]:
     return sorted(groups.values(), key=lambda group: group.position_name.casefold())
 
 
+def _pay_rate_row_categories(group: PayRateGroup) -> list[str]:
+    order = [STUDENT_CATEGORY, "1", "2", "3", NO_CATEGORY]
+    known = [category for category in order if category in group.rates]
+    unknown = sorted((category for category in group.rates if category not in order), key=str.casefold)
+    return [*known, *unknown]
+
+
 def _pay_category_title(category: str) -> str:
     if category == STUDENT_CATEGORY:
         return "Категория 0"
     if category == NO_CATEGORY:
         return "Без категории"
     return f"Категория {category}"
+
+
+def _pay_category_row_title(category: str) -> str:
+    if category == STUDENT_CATEGORY:
+        return "Разряд 0 / ученик"
+    if category == NO_CATEGORY:
+        return "—"
+    return f"Разряд {category}"
 
 
 def _format_money(value: str) -> str:
@@ -1437,6 +1619,33 @@ def _is_overdue(value: str) -> bool:
 
 def _display_calendar_date(value: date) -> str:
     return value.strftime("%d.%m.%Y")
+
+
+def _date_to_qdate(value: date) -> QDate:
+    return QDate(value.year, value.month, value.day)
+
+
+def _qdate_to_date(value: QDate) -> date:
+    return date(value.year(), value.month(), value.day())
+
+
+def _default_calendar_day_type(value: date) -> str:
+    return WorkDayType.DAY_OFF.value if value.weekday() >= 5 else WorkDayType.WORKDAY.value
+
+
+def _calendar_date_format(day_type: str) -> QTextCharFormat:
+    palette = {
+        WorkDayType.DAY_OFF.value: ("#f1f3f5", "#6b7280"),
+        WorkDayType.HOLIDAY.value: ("#ffe4e6", "#b42318"),
+        WorkDayType.WORKING_SATURDAY.value: ("#dcfce7", "#166534"),
+        WorkDayType.WORKING_HOLIDAY.value: ("#e0f2fe", "#075985"),
+        WorkDayType.SHORTENED_WORKDAY.value: ("#fff7cc", "#92400e"),
+    }
+    background, foreground = palette.get(day_type, ("#ffffff", "#111827"))
+    text_format = QTextCharFormat()
+    text_format.setBackground(QBrush(QColor(background)))
+    text_format.setForeground(QBrush(QColor(foreground)))
+    return text_format
 
 
 def _calendar_payment_mode(day_type: str) -> str:

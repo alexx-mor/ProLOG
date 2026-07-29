@@ -1,5 +1,27 @@
 ﻿# Changelog
 
+## 2026-07-29 - Directory editing and production calendar view
+
+### Added
+
+- Added object filter to the product directory.
+- Added visual production calendar view with highlighted weekends, holidays, working weekends and shortened workdays.
+- Added production calendar synchronization foundation through a separate `production_calendar.py` provider module using the public `isdayoff.ru` API.
+
+### Changed
+
+- Double click now opens editing in all table-based directories instead of toggling active state.
+- Removed active-status controls from the product edit dialog.
+- Redesigned the payment edit dialog as an Excel-like table by position and grade.
+- Renamed the payment KTU column `КД` to `Командировка дальняя (КД)`.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- SQLite smoke test passed for products and calendar day saving.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-29 - Product directory and pay table redesign
 
 ### Added

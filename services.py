@@ -9,6 +9,7 @@ from category_rules import category_values_from_rule, normalize_employee_categor
 from directory_files import load_position_category_map
 from database import DirectoryRepository, EmployeeRepository, WorkLogRepository
 from models import Employee, ProductItem, WorkCalendarDay, WorkLogEntry
+from production_calendar import API_NOTE_PREFIX, IsDayOffCalendarProvider
 
 
 class DirectoryService:
@@ -89,6 +90,19 @@ class DirectoryService:
 
     def delete_calendar_day(self, item_id: int) -> None:
         self.repository.delete_calendar_day(item_id)
+
+    def import_production_calendar(self, year: int) -> int:
+        provider = IsDayOffCalendarProvider()
+        result = provider.load_year(year)
+        existing = {item.work_date: item for item in self.list_calendar_days(date(year, 1, 1), date(year, 12, 31))}
+        for calendar_day in result.days:
+            current = existing.get(calendar_day.work_date)
+            if current and current.note and not current.note.startswith(API_NOTE_PREFIX):
+                calendar_day.note = current.note
+            if current:
+                calendar_day.id = current.id
+            self.repository.save_calendar_day(calendar_day)
+        return len(result.days)
 
     def list_products(self, active_only: bool = False) -> list[ProductItem]:
         return self.repository.list_products(active_only)

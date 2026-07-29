@@ -34,6 +34,7 @@ class ProductStatus(StrEnum):
 
 class WorkDayType(StrEnum):
     WORKDAY = "Рабочий день"
+    SHORTENED_WORKDAY = "Сокращенный рабочий день"
     DAY_OFF = "Выходной"
     HOLIDAY = "Праздничный день"
     WORKING_SATURDAY = "Рабочая суббота"
