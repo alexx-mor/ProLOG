@@ -224,13 +224,22 @@ def _entry_payroll(
 ) -> Decimal:
     if hours <= 0 or pay_rate is None:
         return Decimal("0")
-    salary = _parse_money(pay_rate.salary)
+    salary = _payroll_base_salary(pay_rate, entry)
     if salary <= 0:
         return Decimal("0")
     multiplier = _payroll_multiplier(pay_rate, entry, calendar_by_date)
     if pay_rate.salary_type == "monthly":
         return salary / Decimal(monthly_hours_norm) * Decimal(hours) * multiplier
     return salary * Decimal(hours) * multiplier
+
+
+def _payroll_base_salary(pay_rate: PayRate, entry: WorkLogEntry) -> Decimal:
+    location = (entry.location_name or "").casefold()
+    if "кд" in location or "kd" in location or "дальн" in location:
+        far_trip_salary = _parse_money(pay_rate.far_trip_salary)
+        if far_trip_salary > 0:
+            return far_trip_salary
+    return _parse_money(pay_rate.salary)
 
 
 def _payroll_multiplier(
@@ -244,9 +253,7 @@ def _payroll_multiplier(
     if day_type == WorkDayType.WORKING_SATURDAY.value:
         return _parse_coefficient(pay_rate.saturday_coeff)
     location = (entry.location_name or "").casefold()
-    if "кд" in location or "дальн" in location:
-        return _parse_coefficient(pay_rate.far_trip_coeff)
-    if "кб" in location or "ближн" in location:
+    if "кб" in location or "kb" in location or "ближн" in location:
         return _parse_coefficient(pay_rate.near_trip_coeff)
     return Decimal("1")
 

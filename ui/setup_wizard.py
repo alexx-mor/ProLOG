@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 import excel_export
 from services import DirectoryService, EmployeeService
-from ui.dialogs import EmployeeDialog, PositionDialog, TextInputDialog
+from ui.dialogs import EmployeeDialog, ObjectDialog, PositionDialog, TextInputDialog
 
 
 class InitialSetupDialog(QDialog):
@@ -184,7 +184,7 @@ class _DirectorySetupPage(QWidget):
         self.items = []
         header = QLabel(title)
         header.setObjectName("DialogTitle")
-        note = QLabel("Проверьте активные элементы справочника. Двойной клик по строке меняет статус.")
+        note = QLabel("Проверьте активные элементы справочника. Двойной клик по строке открывает редактирование.")
         note.setWordWrap(True)
         self.table = QTableWidget(0, 3 if key == "positions" else 2)
         self.table.horizontalHeader().setStretchLastSection(False)
@@ -265,10 +265,20 @@ class _DirectorySetupPage(QWidget):
         if self.key == "positions":
             dialog = PositionDialog(parent=self)
             if dialog.exec():
-                name, category, student_allowed, salary, salary_type, group = dialog.values()
+                name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 item_id = self.directories.ensure(self.key, name)
                 if item_id is not None:
                     self.directories.update_position_details(item_id, name, category, student_allowed, salary, salary_type, group)
+                    self.directories.set_active(self.key, item_id, is_active)
+                self.refresh()
+            return
+        if self.key == "objects":
+            dialog = ObjectDialog(parent=self)
+            if dialog.exec():
+                values = dialog.values()
+                item_id = self.directories.ensure(self.key, values[0])
+                if item_id is not None:
+                    self.directories.update_object_details(item_id, *values)
                 self.refresh()
             return
         dialog = TextInputDialog("Добавить", "Название", parent=self)
@@ -283,8 +293,15 @@ class _DirectorySetupPage(QWidget):
         if self.key == "positions":
             dialog = PositionDialog(item, self)
             if dialog.exec():
-                name, category, student_allowed, salary, salary_type, group = dialog.values()
+                name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 self.directories.update_position_details(item.id, name, category, student_allowed, salary, salary_type, group)
+                self.directories.set_active(self.key, item.id, is_active)
+                self.refresh()
+            return
+        if self.key == "objects":
+            dialog = ObjectDialog(item, self)
+            if dialog.exec():
+                self.directories.update_object_details(item.id, *dialog.values())
                 self.refresh()
             return
         dialog = TextInputDialog("Переименовать", "Название", item.name, self)
@@ -312,8 +329,7 @@ class _DirectorySetupPage(QWidget):
     def _toggle(self) -> None:
         item = self._selected()
         if item:
-            self.directories.set_active(self.key, item.id, not item.is_active)
-            self.refresh()
+            self._rename()
 
     def _context_menu(self, position) -> None:
         menu = QMenu(self)

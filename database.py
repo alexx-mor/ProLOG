@@ -82,6 +82,8 @@ class Database:
         pay_rate_columns = {row["name"] for row in connection.execute("PRAGMA table_info(PayRates)")}
         if "far_trip_coeff" not in pay_rate_columns:
             connection.execute("ALTER TABLE PayRates ADD COLUMN far_trip_coeff TEXT NOT NULL DEFAULT '1'")
+        if "far_trip_salary" not in pay_rate_columns:
+            connection.execute("ALTER TABLE PayRates ADD COLUMN far_trip_salary TEXT NOT NULL DEFAULT ''")
         if "near_trip_coeff" not in pay_rate_columns:
             connection.execute("ALTER TABLE PayRates ADD COLUMN near_trip_coeff TEXT NOT NULL DEFAULT '1'")
         if "holiday_coeff" not in pay_rate_columns:
@@ -171,14 +173,15 @@ class Database:
             for category in pay_categories_for_position(row["category"] or NO_CATEGORY, bool(row["student_allowed"])):
                 connection.execute(
                     """
-                    INSERT INTO PayRates (position_id, category, salary, salary_type)
-                    VALUES (?, ?, ?, ?)
+                    INSERT INTO PayRates (position_id, category, salary, far_trip_salary, salary_type)
+                    VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(position_id, category) DO NOTHING
                     """,
                     (
                         row["id"],
                         category,
                         row["salary"] or "",
+                        "",
                         _normalize_salary_type(row["salary_type"] or "hourly"),
                     ),
                 )
@@ -552,6 +555,7 @@ class DirectoryRepository:
                     p.name AS position_name,
                     pr.category,
                     pr.salary,
+                    pr.far_trip_salary,
                     pr.salary_type,
                     pr.far_trip_coeff,
                     pr.near_trip_coeff,
@@ -570,6 +574,7 @@ class DirectoryRepository:
                 position_name=row["position_name"] or "",
                 category=row["category"] or NO_CATEGORY,
                 salary=row["salary"] or "",
+                far_trip_salary=row["far_trip_salary"] or "",
                 salary_type=_normalize_salary_type(row["salary_type"] or "hourly"),
                 far_trip_coeff=row["far_trip_coeff"] or "1",
                 near_trip_coeff=row["near_trip_coeff"] or "1",
@@ -584,6 +589,7 @@ class DirectoryRepository:
         self,
         item_id: int,
         salary: str,
+        far_trip_salary: str,
         salary_type: str,
         far_trip_coeff: str,
         near_trip_coeff: str,
@@ -595,6 +601,7 @@ class DirectoryRepository:
                 """
                 UPDATE PayRates
                 SET salary = ?,
+                    far_trip_salary = ?,
                     salary_type = ?,
                     far_trip_coeff = ?,
                     near_trip_coeff = ?,
@@ -604,6 +611,7 @@ class DirectoryRepository:
                 """,
                 (
                     salary.strip(),
+                    far_trip_salary.strip(),
                     _normalize_salary_type(salary_type),
                     _normalize_coefficient(far_trip_coeff),
                     _normalize_coefficient(near_trip_coeff),
@@ -957,6 +965,7 @@ CREATE TABLE IF NOT EXISTS PayRates (
     position_id INTEGER NOT NULL REFERENCES Positions(id) ON DELETE CASCADE,
     category TEXT NOT NULL DEFAULT '—',
     salary TEXT NOT NULL DEFAULT '',
+    far_trip_salary TEXT NOT NULL DEFAULT '',
     salary_type TEXT NOT NULL DEFAULT 'hourly',
     far_trip_coeff TEXT NOT NULL DEFAULT '1',
     near_trip_coeff TEXT NOT NULL DEFAULT '1',

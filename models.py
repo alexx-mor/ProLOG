@@ -77,6 +77,7 @@ class PayRate:
     position_name: str
     category: str
     salary: str = ""
+    far_trip_salary: str = ""
     salary_type: str = "hourly"
     far_trip_coeff: str = "1"
     near_trip_coeff: str = "1"

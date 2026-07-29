@@ -1,5 +1,26 @@
 ﻿# Changelog
 
+## 2026-07-29 - Setup objects, far-trip pay and yearly calendar
+
+### Added
+
+- Added full object-card editing to the initial setup wizard object step.
+- Added separate far business trip pay amounts per position category.
+- Added 12-month yearly calendar layout to the work calendar directory.
+
+### Changed
+
+- Far business trip payroll now uses a separate pay amount instead of a coefficient.
+- Payment editing now follows the Excel-like layout: position, grade, base pay and far business trip pay.
+- Double click in the initial setup wizard directories opens editing instead of toggling active state.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- SQLite and analytics smoke test passed for category-based far business trip pay.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-29 - Directory editing and production calendar view
 
 ### Added

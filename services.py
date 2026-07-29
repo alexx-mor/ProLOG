@@ -123,6 +123,7 @@ class DirectoryService:
         self,
         item_id: int,
         salary: str,
+        far_trip_salary: str,
         salary_type: str,
         far_trip_coeff: str,
         near_trip_coeff: str,
@@ -132,6 +133,7 @@ class DirectoryService:
         self.repository.update_pay_rate(
             item_id,
             salary,
+            far_trip_salary,
             salary_type,
             far_trip_coeff,
             near_trip_coeff,

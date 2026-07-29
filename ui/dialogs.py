@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHeaderView,
     QHBoxLayout,
     QLabel,
@@ -622,21 +623,21 @@ class PayRateDialog(QDialog):
         index = self.salary_type.findData(group.salary_type)
         self.salary_type.setCurrentIndex(index if index >= 0 else 0)
         self.category_rows = _pay_rate_row_categories(group)
-        self.table = QTableWidget(len(self.category_rows), 3)
+        self.table = QTableWidget(len(self.category_rows), 4)
         self.table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.EditKeyPressed)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.table.setColumnWidth(0, 280)
         self.table.setColumnWidth(1, 170)
         self._fill_amount_table()
-        self.far_trip_coeff = QLineEdit(group.far_trip_coeff)
         self.near_trip_coeff = QLineEdit(group.near_trip_coeff)
         self.holiday_coeff = QLineEdit(group.holiday_coeff)
         self.saturday_coeff = QLineEdit(group.saturday_coeff)
-        for coeff in (self.far_trip_coeff, self.near_trip_coeff, self.holiday_coeff, self.saturday_coeff):
+        for coeff in (self.near_trip_coeff, self.holiday_coeff, self.saturday_coeff):
             coeff.setPlaceholderText("Например: 1,5")
         self.salary_type.currentIndexChanged.connect(self._update_amount_header)
 
@@ -652,7 +653,6 @@ class PayRateDialog(QDialog):
         layout = QFormLayout(self)
         layout.addRow("Тип оплаты", self.salary_type)
         layout.addRow(self.table)
-        layout.addRow("Командировка дальняя (КД)", self.far_trip_coeff)
         layout.addRow("КТУ КБ (ближняя командировка)", self.near_trip_coeff)
         layout.addRow("КТУ воскр. и праздники", self.holiday_coeff)
         layout.addRow("КТУ суббота", self.saturday_coeff)
@@ -669,9 +669,12 @@ class PayRateDialog(QDialog):
             category_item.setToolTip(category_item.text())
             amount_item = QTableWidgetItem(self.group.rates[category].salary)
             amount_item.setToolTip(amount_item.text())
+            far_trip_item = QTableWidgetItem(self.group.rates[category].far_trip_salary)
+            far_trip_item.setToolTip(far_trip_item.text())
             self.table.setItem(row, 0, position)
             self.table.setItem(row, 1, category_item)
             self.table.setItem(row, 2, amount_item)
+            self.table.setItem(row, 3, far_trip_item)
             for column in range(self.table.columnCount()):
                 self.table.item(row, column).setBackground(QColor("#eaf4fb" if row % 2 == 0 else "#fff2e8"))
         if len(self.category_rows) > 1:
@@ -680,16 +683,19 @@ class PayRateDialog(QDialog):
 
     def _update_amount_header(self) -> None:
         amount_header = "Зарплата" if self.salary_type.currentData() == "monthly" else "Ставка"
-        self.table.setHorizontalHeaderLabels(["Должность", "Разряд", amount_header])
+        self.table.setHorizontalHeaderLabels(["Должность", "Разряд", amount_header, "Командировка дальняя"])
 
-    def values(self) -> tuple[str, dict[str, str], str, str, str, str]:
+    def values(self) -> tuple[str, dict[str, str], dict[str, str], str, str, str]:
         return (
             str(self.salary_type.currentData() or "hourly"),
             {
                 category: (self.table.item(row, 2).text().strip() if self.table.item(row, 2) else "")
                 for row, category in enumerate(self.category_rows)
             },
-            self.far_trip_coeff.text().strip(),
+            {
+                category: (self.table.item(row, 3).text().strip() if self.table.item(row, 3) else "")
+                for row, category in enumerate(self.category_rows)
+            },
             self.near_trip_coeff.text().strip(),
             self.holiday_coeff.text().strip(),
             self.saturday_coeff.text().strip(),
@@ -728,10 +734,8 @@ class DirectoryDialog(QDialog):
         self.calendar_year = QSpinBox()
         self.calendar_year.setRange(2000, 2100)
         self.calendar_year.setValue(QDate.currentDate().year())
-        self.calendar_widget = QCalendarWidget()
-        self.calendar_widget.setGridVisible(True)
-        self.calendar_widget.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
-        self.calendar_widget.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        self.calendar_widgets = [self._create_month_calendar(month) for month in range(1, 13)]
+        self._selected_calendar_date = QDate.currentDate().toPython()
         self.calendar_day_label = QLabel()
         self.calendar_day_type = QComboBox()
         self.calendar_day_type.addItems([day_type.value for day_type in WorkDayType])
@@ -851,8 +855,14 @@ class DirectoryDialog(QDialog):
                 cell = QTableWidgetItem(value)
                 cell.setToolTip(cell.text())
                 self.table.setItem(row, column, cell)
-            coeffs = [group.far_trip_coeff, group.near_trip_coeff, group.holiday_coeff, group.saturday_coeff]
-            for column, value in enumerate(coeffs, start=6):
+            for column, category in enumerate(PAY_CATEGORY_COLUMNS, start=6):
+                rate = group.rates.get(category)
+                value = _format_money(rate.far_trip_salary) if rate and rate.far_trip_salary.strip() else "—"
+                cell = QTableWidgetItem(value)
+                cell.setToolTip(cell.text())
+                self.table.setItem(row, column, cell)
+            coeffs = [group.near_trip_coeff, group.holiday_coeff, group.saturday_coeff]
+            for column, value in enumerate(coeffs, start=10):
                 cell = QTableWidgetItem(_format_coefficient(value))
                 cell.setToolTip(cell.text())
                 self.table.setItem(row, column, cell)
@@ -876,13 +886,15 @@ class DirectoryDialog(QDialog):
 
     def _refresh_calendar_view(self) -> None:
         self._calendar_days_by_date = {item.work_date: item for item in self._items}
+        self._sync_calendar_pages()
         self._apply_calendar_formats()
         self._sync_calendar_selection()
 
     def _apply_calendar_formats(self) -> None:
         empty_format = QTextCharFormat()
-        for work_date in self._calendar_formatted_dates:
-            self.calendar_widget.setDateTextFormat(_date_to_qdate(work_date), empty_format)
+        for calendar in self.calendar_widgets:
+            for work_date in self._calendar_formatted_dates:
+                calendar.setDateTextFormat(_date_to_qdate(work_date), empty_format)
         self._calendar_formatted_dates.clear()
 
         year = self.calendar_year.value()
@@ -892,9 +904,32 @@ class DirectoryDialog(QDialog):
             calendar_day = self._calendar_days_by_date.get(current)
             day_type = calendar_day.day_type if calendar_day else _default_calendar_day_type(current)
             if day_type != WorkDayType.WORKDAY.value:
-                self.calendar_widget.setDateTextFormat(_date_to_qdate(current), _calendar_date_format(day_type))
+                qdate = _date_to_qdate(current)
+                for calendar in self.calendar_widgets:
+                    calendar.setDateTextFormat(qdate, _calendar_date_format(day_type))
                 self._calendar_formatted_dates.add(current)
             current += timedelta(days=1)
+
+    def _create_month_calendar(self, month: int) -> QCalendarWidget:
+        calendar = QCalendarWidget()
+        calendar.setGridVisible(True)
+        calendar.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
+        calendar.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
+        calendar.setNavigationBarVisible(False)
+        calendar.setMinimumWidth(210)
+        calendar.setMaximumHeight(205)
+        calendar.setCurrentPage(self.calendar_year.value(), month)
+        calendar.clicked.connect(self._calendar_date_clicked)
+        return calendar
+
+    def _sync_calendar_pages(self) -> None:
+        year = self.calendar_year.value()
+        for month, calendar in enumerate(self.calendar_widgets, start=1):
+            calendar.blockSignals(True)
+            calendar.setMinimumDate(QDate(year, 1, 1))
+            calendar.setMaximumDate(QDate(year, 12, 31))
+            calendar.setCurrentPage(year, month)
+            calendar.blockSignals(False)
 
     def _refresh_products(self) -> None:
         self.table.setRowCount(len(self._items))
@@ -933,22 +968,20 @@ class DirectoryDialog(QDialog):
         self.product_object_filter.blockSignals(False)
 
     def _calendar_year_changed(self, year: int) -> None:
-        selected = self.calendar_widget.selectedDate()
-        month_date = QDate(year, selected.month(), 1)
-        day = min(selected.day(), month_date.daysInMonth())
-        self.calendar_widget.setSelectedDate(QDate(year, selected.month(), day))
+        month_date = QDate(year, self._selected_calendar_date.month, 1)
+        day = min(self._selected_calendar_date.day, month_date.daysInMonth())
+        self._selected_calendar_date = date(year, self._selected_calendar_date.month, day)
         self.refresh()
 
-    def _calendar_page_changed(self, year: int, _month: int) -> None:
-        if self.calendar_year.value() == year:
+    def _calendar_date_clicked(self, selected: QDate) -> None:
+        self._selected_calendar_date = _qdate_to_date(selected)
+        if self.calendar_year.value() != selected.year():
+            self.calendar_year.setValue(selected.year())
             return
-        self.calendar_year.blockSignals(True)
-        self.calendar_year.setValue(year)
-        self.calendar_year.blockSignals(False)
-        self.refresh()
+        self._sync_calendar_selection()
 
     def _sync_calendar_selection(self) -> None:
-        selected = _qdate_to_date(self.calendar_widget.selectedDate())
+        selected = self._selected_calendar_date
         calendar_day = self._calendar_days_by_date.get(selected)
         self.calendar_day_label.setText(_display_calendar_date(selected))
         day_type = calendar_day.day_type if calendar_day else _default_calendar_day_type(selected)
@@ -960,7 +993,7 @@ class DirectoryDialog(QDialog):
         self.calendar_note.setText(note)
 
     def _save_selected_calendar_day(self) -> None:
-        selected = _qdate_to_date(self.calendar_widget.selectedDate())
+        selected = self._selected_calendar_date
         calendar_day = self._calendar_days_by_date.get(selected)
         self._save_calendar_day(
             WorkCalendarDay(
@@ -972,7 +1005,7 @@ class DirectoryDialog(QDialog):
         )
 
     def _delete_selected_calendar_day(self) -> None:
-        selected = _qdate_to_date(self.calendar_widget.selectedDate())
+        selected = self._selected_calendar_date
         calendar_day = self._calendar_days_by_date.get(selected)
         if not calendar_day or calendar_day.id is None:
             self._info("Для выбранной даты нет сохраненной настройки")
@@ -1015,6 +1048,12 @@ class DirectoryDialog(QDialog):
         calendar_top.addWidget(self.calendar_import_button)
         calendar_top.addStretch()
 
+        calendar_grid = QGridLayout()
+        calendar_grid.setHorizontalSpacing(12)
+        calendar_grid.setVerticalSpacing(12)
+        for index, calendar in enumerate(self.calendar_widgets):
+            calendar_grid.addWidget(calendar, index // 4, index % 4)
+
         calendar_editor = QFormLayout()
         calendar_editor.addRow("Дата", self.calendar_day_label)
         calendar_editor.addRow("Тип дня", self.calendar_day_type)
@@ -1027,7 +1066,7 @@ class DirectoryDialog(QDialog):
         calendar_layout = QVBoxLayout(self.calendar_panel)
         calendar_layout.setContentsMargins(0, 0, 0, 0)
         calendar_layout.addLayout(calendar_top)
-        calendar_layout.addWidget(self.calendar_widget)
+        calendar_layout.addLayout(calendar_grid)
         calendar_layout.addLayout(calendar_editor)
         calendar_layout.addLayout(calendar_buttons)
 
@@ -1060,8 +1099,6 @@ class DirectoryDialog(QDialog):
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.product_object_filter.currentIndexChanged.connect(self.refresh)
         self.calendar_year.valueChanged.connect(self._calendar_year_changed)
-        self.calendar_widget.selectionChanged.connect(self._sync_calendar_selection)
-        self.calendar_widget.currentPageChanged.connect(self._calendar_page_changed)
         self.calendar_save_button.clicked.connect(self._save_selected_calendar_day)
         self.calendar_delete_button.clicked.connect(self._delete_selected_calendar_day)
         self.calendar_import_button.clicked.connect(self._import_calendar_year)
@@ -1254,18 +1291,20 @@ class DirectoryDialog(QDialog):
     def _save_pay_rate_group(
         self,
         group: PayRateGroup,
-        values: tuple[str, dict[str, str], str, str, str, str],
+        values: tuple[str, dict[str, str], dict[str, str], str, str, str],
     ) -> None:
-        salary_type, amounts, far_trip, near_trip, holiday, saturday = values
+        salary_type, amounts, far_trip_amounts, near_trip, holiday, saturday = values
         for category, rate in group.rates.items():
             if rate.id is None:
                 continue
             salary = amounts.get(category, rate.salary)
+            far_trip_salary = far_trip_amounts.get(category, rate.far_trip_salary)
             self.directory_service.update_pay_rate(
                 rate.id,
                 salary,
+                far_trip_salary,
                 salary_type,
-                far_trip,
+                "1",
                 near_trip,
                 holiday,
                 saturday,
@@ -1371,32 +1410,34 @@ class DirectoryDialog(QDialog):
             self.table.setColumnWidth(3, 82)
             self.table.setColumnWidth(4, 92)
         elif self.current_key == "pay_rates":
-            self.table.setColumnCount(10)
+            self.table.setColumnCount(13)
             self.table.setHorizontalHeaderLabels(
                 [
                     "Должность",
                     "Тип",
-                    "Категория 0",
-                    "Категория 1",
-                    "Категория 2",
-                    "Категория 3",
-                    "Командировка дальняя (КД)",
+                    "Ст. 0",
+                    "Ст. 1",
+                    "Ст. 2",
+                    "Ст. 3",
+                    "КД 0",
+                    "КД 1",
+                    "КД 2",
+                    "КД 3",
                     "КТУ КБ",
                     "Воскр./празд.",
                     "Суббота",
                 ]
             )
             self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            for column in range(1, 10):
+            for column in range(1, 13):
                 self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(0, 260)
+            self.table.setColumnWidth(0, 230)
             self.table.setColumnWidth(1, 82)
-            for column in range(2, 6):
-                self.table.setColumnWidth(column, 118)
-            self.table.setColumnWidth(6, 210)
-            self.table.setColumnWidth(7, 78)
-            self.table.setColumnWidth(8, 112)
-            self.table.setColumnWidth(9, 82)
+            for column in range(2, 10):
+                self.table.setColumnWidth(column, 90)
+            self.table.setColumnWidth(10, 78)
+            self.table.setColumnWidth(11, 112)
+            self.table.setColumnWidth(12, 82)
         elif self.current_key == "objects":
             self.table.setColumnCount(11)
             self.table.setHorizontalHeaderLabels(
