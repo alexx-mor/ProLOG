@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import QDate, QEvent, Qt
-from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QIntValidator, QPainter, QPixmap, QTextCharFormat
+from PySide6.QtCore import QDate, QEvent, QSize, Qt
+from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QIntValidator, QPainter, QPen, QPixmap, QTextCharFormat
 from PySide6.QtWidgets import (
     QCheckBox,
     QCalendarWidget,
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QListView,
     QMessageBox,
     QMenu,
@@ -727,24 +728,38 @@ class PayRateDialog(QDialog):
 class DirectoryDialog(QDialog):
     DIRECTORY_LABELS = {
         "locations": "Местонахождения",
-        "objects": "Объекты",
-        "products": "Изделия",
+        "work_types": "Виды работ",
         "positions": "Должности",
         "pay_rates": "Оплата",
+        "objects": "Объекты",
+        "products": "Изделия",
         "calendar": "Производственный календарь",
-        "work_types": "Виды работ",
+    }
+    DIRECTORY_TITLES = {
+        "locations": "Справочник местонахождений",
+        "work_types": "Справочник видов работ",
+        "positions": "Справочник должностей",
+        "pay_rates": "Справочник оплаты",
+        "objects": "Справочник объектов",
+        "products": "Справочник изделий",
+        "calendar": "Производственный календарь",
     }
 
     def __init__(self, directory_service, parent=None, initial_key: str = "locations") -> None:
         super().__init__(parent)
         self.setWindowTitle("Справочники")
-        self.resize(1240, 820)
+        self.resize(1320, 820)
         self.directory_service = directory_service
         self.current_key = initial_key if initial_key in self.DIRECTORY_LABELS else "locations"
         self.navigation = QListWidget()
-        self.navigation.setFixedWidth(190)
+        self.navigation.setFixedWidth(285)
+        self.navigation.setIconSize(QSize(22, 22))
+        self.title_label = QLabel()
+        self.title_label.setObjectName("DialogTitle")
         self.search = QLineEdit()
         self.search.setPlaceholderText("Поиск по справочнику")
+        self.show_inactive = QCheckBox("Показывать неактивные")
+        self.show_inactive.setChecked(True)
         self.table = QTableWidget(0, 2)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -785,6 +800,7 @@ class DirectoryDialog(QDialog):
         self.refresh()
 
     def refresh(self) -> None:
+        self.title_label.setText(self.DIRECTORY_TITLES.get(self.current_key, "Справочник"))
         self._configure_table()
         self._update_button_visibility()
         needle = self.search.text().strip().casefold()
@@ -808,20 +824,26 @@ class DirectoryDialog(QDialog):
                 item
                 for item in self.directory_service.list_products()
                 if (
+                    self._should_show_item(item)
+                    and
                     (selected_object_id is None or item.object_id == selected_object_id)
                     and (
-                    not needle
-                    or needle in item.object_name.casefold()
-                    or needle in item.serial_number.casefold()
-                    or needle in item.name.casefold()
-                    or needle in item.code.casefold()
-                    or needle in item.product_status.casefold()
+                        not needle
+                        or needle in item.object_name.casefold()
+                        or needle in item.serial_number.casefold()
+                        or needle in item.name.casefold()
+                        or needle in item.code.casefold()
+                        or needle in item.product_status.casefold()
                     )
                 )
             ]
             self._refresh_products()
             return
-        self._items = [item for item in self.directory_service.list_all(self.current_key) if not needle or needle in item.name.casefold()]
+        self._items = [
+            item
+            for item in self.directory_service.list_all(self.current_key)
+            if self._should_show_item(item) and (not needle or needle in item.name.casefold())
+        ]
         self.table.setRowCount(len(self._items))
         for row, item in enumerate(self._items):
             name = QTableWidgetItem(item.name)
@@ -993,11 +1015,16 @@ class DirectoryDialog(QDialog):
         self.product_object_filter.clear()
         self.product_object_filter.addItem("Все объекты", None)
         for item in self.directory_service.list_all("objects"):
+            if not self._should_show_item(item):
+                continue
             self.product_object_filter.addItem(item.name, item.id)
         if current_id is not None:
             index = self.product_object_filter.findData(current_id)
             self.product_object_filter.setCurrentIndex(index if index >= 0 else 0)
         self.product_object_filter.blockSignals(False)
+
+    def _should_show_item(self, item) -> bool:
+        return self.show_inactive.isChecked() or getattr(item, "is_active", True)
 
     def _calendar_year_changed(self, year: int) -> None:
         month_date = QDate(year, self._selected_calendar_date.month, 1)
@@ -1040,8 +1067,6 @@ class DirectoryDialog(QDialog):
         self._info(f"Загружено дней: {imported_count}")
 
     def _build_layout(self) -> None:
-        header = QLabel("Справочники")
-        header.setObjectName("DialogTitle")
         product_filter_layout = QHBoxLayout(self.product_filter_panel)
         product_filter_layout.setContentsMargins(0, 0, 0, 0)
         product_filter_layout.addWidget(QLabel("Объект"))
@@ -1086,8 +1111,11 @@ class DirectoryDialog(QDialog):
         buttons.addStretch()
         buttons.addWidget(self.close_button)
         right = QVBoxLayout()
-        right.addWidget(header)
-        right.addWidget(self.search)
+        filters = QHBoxLayout()
+        filters.addWidget(self.search, 1)
+        filters.addWidget(self.show_inactive)
+        right.addWidget(self.title_label)
+        right.addLayout(filters)
         right.addWidget(self.product_filter_panel)
         right.addWidget(self.table)
         right.addWidget(self.calendar_panel)
@@ -1099,6 +1127,7 @@ class DirectoryDialog(QDialog):
     def _connect(self) -> None:
         self.navigation.currentRowChanged.connect(self._navigation_changed)
         self.search.textChanged.connect(self.refresh)
+        self.show_inactive.toggled.connect(self.refresh)
         self.add_button.clicked.connect(self._add_item)
         self.rename_button.clicked.connect(self._rename_item)
         self.disable_button.clicked.connect(lambda: self._set_active(False))
@@ -1112,8 +1141,10 @@ class DirectoryDialog(QDialog):
         self.calendar_import_button.clicked.connect(self._import_calendar_year)
 
     def _fill_navigation(self) -> None:
-        for label in self.DIRECTORY_LABELS.values():
-            self.navigation.addItem(label)
+        for key, label in self.DIRECTORY_LABELS.items():
+            item = QListWidgetItem(_directory_icon(key), label)
+            item.setToolTip(label)
+            self.navigation.addItem(item)
         keys = list(self.DIRECTORY_LABELS)
         self.navigation.setCurrentRow(keys.index(self.current_key))
 
@@ -1516,6 +1547,7 @@ class DirectoryDialog(QDialog):
         is_calendar = self.current_key == "calendar"
         is_products = self.current_key == "products"
         self.search.setVisible(not is_calendar)
+        self.show_inactive.setVisible(not is_pay_rates and not is_calendar)
         self.table.setVisible(not is_calendar)
         self.calendar_panel.setVisible(is_calendar)
         self.product_filter_panel.setVisible(is_products)
@@ -1568,6 +1600,62 @@ def _status_icon(color: str) -> QIcon:
     painter.setBrush(QColor(color))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(3, 3, 12, 12)
+    painter.end()
+    return QIcon(pixmap)
+
+
+def _directory_icon(key: str) -> QIcon:
+    colors = {
+        "locations": "#2f80ed",
+        "work_types": "#7c5cc4",
+        "positions": "#2f6f73",
+        "pay_rates": "#a46a12",
+        "objects": "#3d6f9f",
+        "products": "#6c7a2f",
+        "calendar": "#8a4b6f",
+    }
+    pixmap = QPixmap(24, 24)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(QColor(colors.get(key, "#52606d")))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawRoundedRect(2, 2, 20, 20, 5, 5)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(QColor("#ffffff"), 1.6))
+    if key == "locations":
+        painter.drawEllipse(9, 5, 6, 6)
+        painter.drawLine(12, 11, 12, 18)
+        painter.drawLine(9, 15, 12, 18)
+        painter.drawLine(15, 15, 12, 18)
+    elif key == "work_types":
+        painter.drawLine(7, 16, 16, 7)
+        painter.drawLine(14, 7, 18, 11)
+        painter.drawLine(6, 15, 9, 18)
+    elif key == "positions":
+        painter.drawRect(6, 9, 12, 8)
+        painter.drawLine(9, 9, 9, 7)
+        painter.drawLine(9, 7, 15, 7)
+        painter.drawLine(15, 7, 15, 9)
+    elif key == "pay_rates":
+        painter.drawEllipse(6, 5, 12, 12)
+        painter.drawLine(12, 8, 12, 15)
+        painter.drawLine(9, 10, 15, 10)
+    elif key == "objects":
+        painter.drawRect(6, 6, 12, 12)
+        for x in (9, 12, 15):
+            painter.drawLine(x, 8, x, 16)
+        painter.drawLine(6, 12, 18, 12)
+    elif key == "products":
+        painter.drawRect(7, 8, 10, 9)
+        painter.drawLine(7, 8, 12, 5)
+        painter.drawLine(17, 8, 12, 5)
+        painter.drawLine(12, 5, 12, 14)
+    elif key == "calendar":
+        painter.drawRect(5, 7, 14, 11)
+        painter.drawLine(5, 10, 19, 10)
+        painter.drawLine(9, 5, 9, 8)
+        painter.drawLine(15, 5, 15, 8)
     painter.end()
     return QIcon(pixmap)
 

@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 2026-07-30 - Directory navigation polish
+
+### Added
+
+- Added generated navigation icons for each directory section.
+- Added a `Показывать неактивные` switch to hide inactive rows in editable directories.
+
+### Changed
+
+- Widened the directory navigation panel so long names fit better.
+- Reordered directory sections: locations, work types, positions, payment, objects, products and production calendar.
+- The right-side directory title now changes with the selected section.
+
+### Verified
+
+- Python syntax check passed for the changed module.
+- Qt smoke test passed for directory order, navigation width and inactive-row filtering.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - User management and login exit fix
 
 ### Added
