@@ -1,5 +1,28 @@
 ﻿# Changelog
 
+## 2026-07-30 - Calendar read-only view and payroll table grouping
+
+### Added
+
+- Added month titles to the yearly work calendar.
+- Added read-only selected-day explanation for the work calendar: workday, day off, holiday name, shortened day or working weekend.
+- Added local names for the main Russian federal holidays when showing production calendar details.
+
+### Changed
+
+- Disabled mouse-wheel month scrolling inside calendar month widgets.
+- Hidden dates outside each displayed month in the yearly calendar.
+- Removed day-type editing and notes from the work calendar directory view.
+- Redesigned the main payment directory table as an Excel-like multi-row view with merged position, pay type and KTU cells.
+- Updated production calendar import request to distinguish holidays when the provider supports it.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- Production calendar provider smoke test passed for holiday, day off and shortened workday codes.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-29 - Setup objects, far-trip pay and yearly calendar
 
 ### Added
