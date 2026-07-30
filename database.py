@@ -105,6 +105,9 @@ class Database:
         for column, default in object_defaults.items():
             if column not in object_columns:
                 connection.execute(f"ALTER TABLE Objects ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'")
+        worklog_columns = {row["name"] for row in connection.execute("PRAGMA table_info(WorkLogEntries)")}
+        if "product_id" not in worklog_columns:
+            connection.execute("ALTER TABLE WorkLogEntries ADD COLUMN product_id INTEGER REFERENCES Products(id)")
         connection.execute("UPDATE Positions SET category = '—', student_allowed = 0 WHERE name = 'Мастер чистоты'")
         self._sync_pay_rates(connection)
 
@@ -804,7 +807,7 @@ class WorkLogRepository:
                     """
                     UPDATE WorkLogEntries
                     SET employee_id = ?, work_date = ?, location_id = ?, object_id = ?,
-                        work_type_id = ?, description = ?, hours = ?, comment = ?, updated_at = ?
+                        product_id = ?, work_type_id = ?, description = ?, hours = ?, comment = ?, updated_at = ?
                     WHERE id = ?
                     """,
                     self._params(entry, now) + (entry.id,),
@@ -813,10 +816,10 @@ class WorkLogRepository:
             cursor = connection.execute(
                 """
                 INSERT INTO WorkLogEntries (
-                    employee_id, work_date, location_id, object_id, work_type_id,
+                    employee_id, work_date, location_id, object_id, product_id, work_type_id,
                     description, hours, comment, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._params(entry, now, include_created=True),
             )
@@ -831,6 +834,7 @@ class WorkLogRepository:
         date_from: date | None = None,
         date_to: date | None = None,
         object_id: int | None = None,
+        product_id: int | None = None,
     ) -> list[WorkLogEntry]:
         sql = WORKLOG_SELECT
         conditions: list[str] = []
@@ -847,6 +851,9 @@ class WorkLogRepository:
         if object_id:
             conditions.append("w.object_id = ?")
             params.append(object_id)
+        if product_id:
+            conditions.append("w.product_id = ?")
+            params.append(product_id)
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY w.work_date, w.created_at"
@@ -872,6 +879,7 @@ class WorkLogRepository:
             entry.work_date.isoformat(),
             entry.location_id,
             entry.object_id,
+            entry.product_id,
             entry.work_type_id,
             entry.description.strip(),
             entry.hours,
@@ -886,6 +894,7 @@ class WorkLogRepository:
             work_date=date.fromisoformat(row["work_date"]),
             location_id=row["location_id"],
             object_id=row["object_id"],
+            product_id=row["product_id"],
             work_type_id=row["work_type_id"],
             description=row["description"] or "",
             hours=int(row["hours"] or 0),
@@ -895,6 +904,7 @@ class WorkLogRepository:
             employee_name=row["employee_name"] or "",
             location_name=row["location_name"] or "",
             object_name=row["object_name"] or "",
+            product_name=row["product_name"] or "",
             work_type_name=row["work_type_name"] or "",
         )
 
@@ -905,11 +915,13 @@ WORKLOG_SELECT = """
         e.full_name AS employee_name,
         l.name AS location_name,
         o.name AS object_name,
+        p.name AS product_name,
         wt.name AS work_type_name
     FROM WorkLogEntries w
     JOIN Employees e ON e.id = w.employee_id
     LEFT JOIN Locations l ON l.id = w.location_id
     LEFT JOIN Objects o ON o.id = w.object_id
+    LEFT JOIN Products p ON p.id = w.product_id
     LEFT JOIN WorkTypes wt ON wt.id = w.work_type_id
 """
 
@@ -994,6 +1006,7 @@ CREATE TABLE IF NOT EXISTS WorkLogEntries (
     work_date TEXT NOT NULL,
     location_id INTEGER REFERENCES Locations(id),
     object_id INTEGER REFERENCES Objects(id),
+    product_id INTEGER REFERENCES Products(id),
     work_type_id INTEGER REFERENCES WorkTypes(id),
     description TEXT NOT NULL DEFAULT '',
     hours REAL NOT NULL DEFAULT 0,
@@ -1044,6 +1057,7 @@ CREATE TABLE IF NOT EXISTS Settings (
 
 CREATE INDEX IF NOT EXISTS idx_worklog_employee_date ON WorkLogEntries(employee_id, work_date);
 CREATE INDEX IF NOT EXISTS idx_worklog_date ON WorkLogEntries(work_date);
+CREATE INDEX IF NOT EXISTS idx_worklog_product ON WorkLogEntries(product_id);
 CREATE INDEX IF NOT EXISTS idx_payrates_position ON PayRates(position_id);
 CREATE INDEX IF NOT EXISTS idx_products_object ON Products(object_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON ImportRows(batch_id);

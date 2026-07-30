@@ -287,12 +287,14 @@ class WorkLogService:
         date_from: date | None = None,
         date_to: date | None = None,
         object_id: int | None = None,
+        product_id: int | None = None,
     ) -> list[WorkLogEntry]:
         return self.worklogs.list_entries(
             employee_id=employee_id,
             date_from=date_from,
             date_to=date_to,
             object_id=object_id,
+            product_id=product_id,
         )
 
 
@@ -313,6 +315,7 @@ class AnalyticsService:
         date_from: date | None = None,
         date_to: date | None = None,
         object_id: int | None = None,
+        product_id: int | None = None,
         monthly_hours_norm: int = 168,
     ) -> AnalyticsResult:
         entries = self.worklogs.search_entries(
@@ -320,6 +323,7 @@ class AnalyticsService:
             date_from=date_from,
             date_to=date_to,
             object_id=object_id,
+            product_id=product_id,
         )
         return build_analytics(
             entries=entries,

@@ -806,7 +806,7 @@ class DirectoryDialog(QDialog):
         "products": "Изделия",
         "positions": "Должности",
         "pay_rates": "Оплата",
-        "calendar": "Календарь рабочего времени",
+        "calendar": "Производственный календарь",
         "work_types": "Виды работ",
     }
 
@@ -976,19 +976,11 @@ class DirectoryDialog(QDialog):
                 self.table.setItem(current_row, 1, category_cell)
                 self.table.setItem(current_row, 3, salary)
                 self.table.setItem(current_row, 4, far_trip)
-                self._color_pay_rate_row(current_row, offset)
 
             if len(categories) > 1:
                 for column in (0, 2, 5, 6, 7):
                     self.table.setSpan(row, column, len(categories), 1)
             row += len(categories)
-
-    def _color_pay_rate_row(self, row: int, offset: int) -> None:
-        background = QColor("#eaf4fb" if offset % 2 == 0 else "#fff2e8")
-        for column in range(self.table.columnCount()):
-            item = self.table.item(row, column)
-            if item:
-                item.setBackground(background)
 
     def _refresh_calendar_days(self) -> None:
         self.table.setRowCount(len(self._items))
@@ -2011,8 +2003,8 @@ HELP_HTML = f"""
   <li>Сохраните запись. Ниже появится список выполненных работ выбранного сотрудника.</li>
   <li>Используйте меню <b>Экспорт</b> для формирования отчета или сменного задания.</li>
 </ol>
-<h3>Календарь и аналитика</h3>
-<p>В меню <b>Настройки - Справочники</b> можно вести календарь рабочего времени:
+<h3>Производственный календарь и аналитика</h3>
+<p>В меню <b>Настройки - Справочники</b> можно открыть производственный календарь:
 рабочие дни, выходные, праздники и рабочие субботы. Эти настройки используются
 во вкладке <b>Аналитика</b> при расчете часов и оплаты.</p>
 <h3>Импорт сотрудников</h3>

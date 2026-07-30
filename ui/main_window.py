@@ -156,10 +156,12 @@ class MainWindow(QMainWindow):
             self.directories.list("locations"),
             active_objects,
             self.directories.list("work_types"),
+            self.directories.list_products(active_only=False),
         )
         self.employee_widget.set_position_filter_options(active_positions)
         self.report_viewer.set_objects(self.directories.list_all("objects"))
         self.analytics_widget.set_objects(self.directories.list_all("objects"))
+        self.analytics_widget.set_products(self.directories.list_products(active_only=False))
 
     def refresh_employees(self, search: str = "") -> None:
         self.employee_widget.set_employees(
@@ -199,6 +201,7 @@ class MainWindow(QMainWindow):
             date_from=self.analytics_widget.date_from_value(),
             date_to=self.analytics_widget.date_to_value(),
             object_id=self.analytics_widget.object_id(),
+            product_id=self.analytics_widget.product_id(),
             monthly_hours_norm=self.config.monthly_hours_norm,
         )
         self.analytics_widget.set_result(result)

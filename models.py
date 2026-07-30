@@ -118,6 +118,7 @@ class WorkLogEntry:
     work_type_id: int | None
     description: str
     hours: int
+    product_id: int | None = None
     comment: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -125,6 +126,7 @@ class WorkLogEntry:
     employee_name: str = ""
     location_name: str = ""
     object_name: str = ""
+    product_name: str = ""
     work_type_name: str = ""
 
 

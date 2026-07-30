@@ -45,9 +45,9 @@ class ReportViewerWidget(QWidget):
         self.date_to = CalendarDateEdit(QDate.currentDate())
         self.apply_button = QPushButton("Показать")
         self.clear_button = QPushButton("Сбросить")
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
-            ["Дата", "Сотрудник", "Объект", "Вид работ", "Описание", "Часы", "Комментарий"]
+            ["Дата", "Сотрудник", "Объект", "Изделие", "Вид работ", "Описание", "Часы", "Комментарий"]
         )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -108,6 +108,7 @@ class ReportViewerWidget(QWidget):
                 entry.work_date.strftime("%d.%m.%Y"),
                 entry.employee_name,
                 entry.object_name,
+                entry.product_name,
                 entry.work_type_name,
                 entry.description,
                 int(entry.hours),
@@ -173,6 +174,6 @@ class ReportViewerWidget(QWidget):
             self.entry_open_requested.emit(int(entry_id))
 
     def _fit_columns(self) -> None:
-        widths = [90, 180, 150, 180, 280, 70]
+        widths = [90, 180, 150, 160, 180, 280, 70, 220]
         for column, width in enumerate(widths):
             self.table.setColumnWidth(column, width)

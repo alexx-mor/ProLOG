@@ -73,7 +73,7 @@ def export_work_report(entries: list[WorkLogEntry], work_date: date, settings: A
     _write_document_header(sheet, f"Отчет выполнения работ за {work_date.strftime('%d.%m.%Y')}", settings)
     _write_header(
         sheet,
-        ["№", "Сотрудник", "Местонахождение", "Объект", "Вид работ", "Описание работ", "Часы", "Комментарий"],
+        ["№", "Сотрудник", "Местонахождение", "Объект", "Изделие", "Вид работ", "Описание работ", "Часы", "Комментарий"],
         row=6,
     )
     for index, entry in enumerate(entries, start=1):
@@ -89,7 +89,7 @@ def export_shift_assignment(entries: list[WorkLogEntry], work_date: date, settin
     sheet = workbook.active
     sheet.title = "Сменное задание"
     _write_document_header(sheet, f"Сменное задание на {work_date.strftime('%d.%m.%Y')}", settings)
-    _write_header(sheet, ["№", "Сотрудник", "Местонахождение", "Объект", "Вид работ", "Задание", "Комментарий"], row=6)
+    _write_header(sheet, ["№", "Сотрудник", "Местонахождение", "Объект", "Изделие", "Вид работ", "Задание", "Комментарий"], row=6)
     for index, entry in enumerate(entries, start=1):
         sheet.append(
             [
@@ -97,6 +97,7 @@ def export_shift_assignment(entries: list[WorkLogEntry], work_date: date, settin
                 entry.employee_name,
                 entry.location_name,
                 entry.object_name,
+                entry.product_name,
                 entry.work_type_name,
                 entry.description,
                 entry.comment,
@@ -129,7 +130,7 @@ def _write_header(sheet, headers: list[str], row: int = 1) -> None:
 def _write_document_header(sheet, title: str, settings: AppSettings | None) -> None:
     sheet["A1"] = title
     sheet["A1"].font = Font(bold=True, size=14)
-    sheet.merge_cells("A1:H1")
+    sheet.merge_cells("A1:I1")
     if not settings:
         return
     sheet["A2"] = f"Организация: {settings.organization_name}".strip()
@@ -143,6 +144,7 @@ def _entry_row(index: int, entry: WorkLogEntry) -> list[object]:
         entry.employee_name,
         entry.location_name,
         entry.object_name,
+        entry.product_name,
         entry.work_type_name,
         entry.description,
         entry.hours,

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from models import Employee, WorkLogEntry
+from models import Employee, ProductItem, WorkLogEntry
 
 
 class CalendarDateEdit(QDateEdit):
@@ -56,6 +56,7 @@ class WorkLogWidget(QWidget):
         super().__init__()
         self.employee: Employee | None = None
         self.entry_id: int | None = None
+        self._products: list[ProductItem] = []
         self.date_edit = CalendarDateEdit(QDate.currentDate())
         self._setup_date_edit(self.date_edit)
         self.today_button = QPushButton("Сегодня")
@@ -66,8 +67,10 @@ class WorkLogWidget(QWidget):
         self.location = QComboBox()
         self.object = QComboBox()
         self.object.setEditable(False)
+        self.product = QComboBox()
+        self.product.setEditable(False)
         self.work_type = QComboBox()
-        for combo in (self.location, self.object, self.work_type):
+        for combo in (self.location, self.object, self.product, self.work_type):
             combo.setView(QListView())
         self.description = QTextEdit()
         self.description.setMinimumHeight(60)
@@ -83,17 +86,18 @@ class WorkLogWidget(QWidget):
         self.clear_button.setMinimumWidth(160)
         self.employee_entries_title = QLabel("Выполненные работы сотрудника")
         self.employee_entries_title.setObjectName("SectionTitle")
-        self.employee_entries = QTableWidget(0, 5)
-        self.employee_entries.setHorizontalHeaderLabels(["Дата", "Объект", "Вид работ", "Описание", "Часы"])
+        self.employee_entries = QTableWidget(0, 6)
+        self.employee_entries.setHorizontalHeaderLabels(["Дата", "Объект", "Изделие", "Вид работ", "Описание", "Часы"])
         self.employee_entries.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.employee_entries.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.employee_entries.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.employee_entries.horizontalHeader().setStretchLastSection(True)
         self.employee_entries.setColumnWidth(0, 95)
-        self.employee_entries.setColumnWidth(1, 160)
-        self.employee_entries.setColumnWidth(2, 180)
-        self.employee_entries.setColumnWidth(3, 360)
-        self.employee_entries.setColumnWidth(4, 70)
+        self.employee_entries.setColumnWidth(1, 150)
+        self.employee_entries.setColumnWidth(2, 160)
+        self.employee_entries.setColumnWidth(3, 180)
+        self.employee_entries.setColumnWidth(4, 320)
+        self.employee_entries.setColumnWidth(5, 70)
 
         self.employee_context = QFrame()
         self.employee_context.setObjectName("EmployeeContext")
@@ -118,6 +122,7 @@ class WorkLogWidget(QWidget):
         form.addRow("Дата", date_layout)
         form.addRow("Местонахождение", self.location)
         form.addRow("Объект", self.object)
+        form.addRow("Изделие", self.product)
         form.addRow("Вид работ", self.work_type)
         form.addRow("Описание работ", self.description)
         form.addRow("Часы", self.hours)
@@ -145,6 +150,7 @@ class WorkLogWidget(QWidget):
         self.clear_button.clicked.connect(self.clear_form)
         self.today_button.clicked.connect(self.set_today)
         self.object.activated.connect(self._object_activated)
+        self.object.currentIndexChanged.connect(lambda _index: self._sync_product_combo())
 
     def set_employee(self, employee: Employee | None) -> None:
         self.employee = employee
@@ -157,10 +163,13 @@ class WorkLogWidget(QWidget):
             self.employee_position.setText(self._employee_info_text("Должность", "-"))
             self.employee_category.setText(self._employee_info_text("Категория", "-"))
 
-    def set_directories(self, locations, objects, work_types) -> None:
+    def set_directories(self, locations, objects, work_types, products=None) -> None:
+        current_product_id = self.product.currentData()
+        self._products = list(products or [])
         self._fill(self.location, locations, include_empty=True)
         self._fill(self.object, objects, include_empty=True)
         self._fill(self.work_type, work_types, include_empty=True)
+        self._sync_product_combo(current_product_id if isinstance(current_product_id, int) else None)
 
     def entry(self) -> WorkLogEntry:
         if self.employee is None or self.employee.id is None:
@@ -171,6 +180,9 @@ class WorkLogWidget(QWidget):
         object_id = object_data if isinstance(object_data, int) else None
         if object_data == self.ADD_OBJECT_ACTION:
             object_name = ""
+        product_name = self.product.currentText().strip()
+        product_data = self.product.currentData()
+        product_id = product_data if isinstance(product_data, int) else None
         location_name = self.location.currentText().strip()
         work_type_name = self.work_type.currentText().strip()
         return WorkLogEntry(
@@ -179,12 +191,14 @@ class WorkLogWidget(QWidget):
             work_date=self.entry_date(),
             location_id=self.location.currentData(),
             object_id=object_id,
+            product_id=product_id,
             work_type_id=self.work_type.currentData(),
             description=self.description.toPlainText(),
             hours=int(self.hours.text() or 0),
             comment=self.comment.toPlainText(),
             location_name=location_name,
             object_name=object_name,
+            product_name=product_name,
             work_type_name=work_type_name,
         )
 
@@ -208,6 +222,7 @@ class WorkLogWidget(QWidget):
         self.date_edit.setDate(QDate(entry.work_date.year, entry.work_date.month, entry.work_date.day))
         self._select_or_add(self.location, entry.location_id, entry.location_name)
         self._select_or_add(self.object, entry.object_id, entry.object_name)
+        self._sync_product_combo(entry.product_id)
         self._select_or_add(self.work_type, entry.work_type_id, entry.work_type_name)
         self.description.setPlainText(entry.description)
         self.hours.setText(str(int(entry.hours)))
@@ -215,7 +230,7 @@ class WorkLogWidget(QWidget):
 
     def clear_form(self) -> None:
         self.entry_id = None
-        for combo in (self.location, self.object, self.work_type):
+        for combo in (self.location, self.object, self.product, self.work_type):
             combo.setCurrentIndex(0 if combo.count() else -1)
         self.description.clear()
         self.hours.setText("0")
@@ -227,6 +242,7 @@ class WorkLogWidget(QWidget):
             values = [
                 entry.work_date.strftime("%d.%m.%Y"),
                 entry.object_name,
+                entry.product_name,
                 entry.work_type_name,
                 entry.description,
                 str(int(entry.hours)),
@@ -250,6 +266,29 @@ class WorkLogWidget(QWidget):
             combo.insertSeparator(combo.count())
             combo.addItem("+ Добавить объект...", self.ADD_OBJECT_ACTION)
         combo.blockSignals(False)
+        if combo is self.object:
+            self._sync_product_combo()
+
+    def _sync_product_combo(self, selected_product_id: int | None = None) -> None:
+        object_id = self.object.currentData()
+        products = [
+            item
+            for item in self._products
+            if isinstance(object_id, int)
+            and item.object_id == object_id
+            and (item.is_active or item.id == selected_product_id)
+        ]
+        self.product.blockSignals(True)
+        self.product.clear()
+        self.product.addItem("", None)
+        for item in products:
+            self.product.addItem(_product_label(item), item.id)
+        if selected_product_id is not None:
+            self._select(self.product, selected_product_id)
+        else:
+            self.product.setCurrentIndex(0 if self.product.count() else -1)
+        self.product.setEnabled(len(products) > 0)
+        self.product.blockSignals(False)
 
     def _select(self, combo: QComboBox, value: int | None) -> None:
         index = combo.findData(value)
@@ -286,3 +325,9 @@ class WorkLogWidget(QWidget):
 
     def _employee_info_text(self, label: str, value: str) -> str:
         return f"{escape(label)}: <u>{escape(value)}</u>"
+
+
+def _product_label(item: ProductItem) -> str:
+    details = [value for value in (item.serial_number, item.code) if value]
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"{item.name}{suffix}"

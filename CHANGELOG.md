@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 2026-07-30 - Product tracking in reports and analytics
+
+### Added
+
+- Added product selection to the employee work-log form.
+- Added product columns to employee work history, report viewer and Excel exports.
+- Added a product filter and a dedicated `По изделиям` analytics table with employees, entries, hours, person-hours and payroll.
+
+### Changed
+
+- Renamed the work-time calendar directory to `Производственный календарь`.
+- Removed colored cell backgrounds from the payment directory table.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- SQLite smoke test passed for saving work-log entries with products and calculating product analytics.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - Calendar navigation lock
 
 ### Fixed

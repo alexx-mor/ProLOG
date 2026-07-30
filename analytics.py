@@ -33,6 +33,17 @@ class ObjectAnalyticsRow:
 
 
 @dataclass(slots=True)
+class ProductAnalyticsRow:
+    object_name: str
+    product_name: str
+    employees_count: int
+    entries_count: int
+    total_hours: int
+    person_hours: int
+    payroll: Decimal
+
+
+@dataclass(slots=True)
 class EmployeeAnalyticsRow:
     employee_name: str
     position: str
@@ -66,6 +77,7 @@ class DateAnalyticsRow:
 class AnalyticsResult:
     summary: AnalyticsSummary
     by_object: list[ObjectAnalyticsRow]
+    by_product: list[ProductAnalyticsRow]
     by_employee: list[EmployeeAnalyticsRow]
     by_work_type: list[WorkTypeAnalyticsRow]
     by_date: list[DateAnalyticsRow]
@@ -74,6 +86,22 @@ class AnalyticsResult:
 @dataclass(slots=True)
 class _GroupAccumulator:
     name: str
+    employees: set[int] = field(default_factory=set)
+    entries_count: int = 0
+    total_hours: int = 0
+    payroll: Decimal = Decimal("0")
+
+    def add(self, employee_id: int, hours: int, payroll: Decimal) -> None:
+        self.employees.add(employee_id)
+        self.entries_count += 1
+        self.total_hours += hours
+        self.payroll += payroll
+
+
+@dataclass(slots=True)
+class _ProductAccumulator:
+    object_name: str
+    product_name: str
     employees: set[int] = field(default_factory=set)
     entries_count: int = 0
     total_hours: int = 0
@@ -120,6 +148,7 @@ def build_analytics(
     calendar_by_date = {item.work_date: item for item in calendar_days or []}
 
     object_groups: dict[str, _GroupAccumulator] = {}
+    product_groups: dict[tuple[int | None, str], _ProductAccumulator] = {}
     employee_groups: dict[int, _EmployeeAccumulator] = {}
     work_type_groups: dict[str, _GroupAccumulator] = {}
     date_groups: dict[str, _GroupAccumulator] = {}
@@ -135,6 +164,7 @@ def build_analytics(
         hours = int(entry.hours or 0)
         payroll = _entry_payroll(hours, pay_rate, monthly_norm, entry, calendar_by_date)
         object_name = entry.object_name or "Без объекта"
+        product_name = entry.product_name or "Без изделия"
         work_type_name = entry.work_type_name or "Без вида работ"
         day_key = entry.work_date.isoformat()
 
@@ -145,6 +175,10 @@ def build_analytics(
 
         object_group = object_groups.setdefault(object_name, _GroupAccumulator(object_name))
         object_group.add(entry.employee_id, hours, payroll)
+
+        product_key = (entry.product_id, product_name if entry.product_id else object_name)
+        product_group = product_groups.setdefault(product_key, _ProductAccumulator(object_name, product_name))
+        product_group.add(entry.employee_id, hours, payroll)
 
         employee_group = employee_groups.setdefault(
             entry.employee_id,
@@ -173,6 +207,18 @@ def build_analytics(
                 payroll=group.payroll.quantize(MONEY_QUANT),
             )
             for group in sorted(object_groups.values(), key=lambda value: value.name.casefold())
+        ],
+        by_product=[
+            ProductAnalyticsRow(
+                object_name=group.object_name,
+                product_name=group.product_name,
+                employees_count=len(group.employees),
+                entries_count=group.entries_count,
+                total_hours=group.total_hours,
+                person_hours=group.total_hours,
+                payroll=group.payroll.quantize(MONEY_QUANT),
+            )
+            for group in sorted(product_groups.values(), key=lambda value: (value.object_name.casefold(), value.product_name.casefold()))
         ],
         by_employee=[
             EmployeeAnalyticsRow(
