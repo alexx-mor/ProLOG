@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 2026-07-30 - Calendar navigation lock
+
+### Fixed
+
+- Blocked mouse-wheel events on the internal calendar month viewports.
+- Blocked keyboard navigation keys inside yearly calendar month widgets so months cannot shift accidentally.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - Calendar read-only view and payroll table grouping
 
 ### Added

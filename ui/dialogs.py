@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QEvent, Qt
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QIntValidator, QPainter, QPixmap, QTextCharFormat
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -76,6 +76,16 @@ FIXED_RU_HOLIDAYS = {
     (6, 12): "День России",
     (11, 4): "День народного единства",
 }
+_CALENDAR_BLOCKED_KEYS = {
+    Qt.Key.Key_Left,
+    Qt.Key.Key_Right,
+    Qt.Key.Key_Up,
+    Qt.Key.Key_Down,
+    Qt.Key.Key_PageUp,
+    Qt.Key.Key_PageDown,
+    Qt.Key.Key_Home,
+    Qt.Key.Key_End,
+}
 
 
 @dataclass(slots=True)
@@ -122,6 +132,7 @@ class MonthCalendarWidget(QCalendarWidget):
         self.setFirstDayOfWeek(Qt.DayOfWeek.Monday)
         self.setVerticalHeaderFormat(QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader)
         self.setNavigationBarVisible(False)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setMinimumWidth(210)
         self.setMaximumHeight(205)
         self.set_month(self.year, month)
@@ -132,9 +143,36 @@ class MonthCalendarWidget(QCalendarWidget):
         self.setMinimumDate(QDate(year, 1, 1))
         self.setMaximumDate(QDate(year, 12, 31))
         self.setCurrentPage(year, month)
+        self._install_event_guards()
+
+    def _install_event_guards(self) -> None:
+        self.installEventFilter(self)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        for child in self.findChildren(QWidget):
+            child.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            child.installEventFilter(self)
+            viewport = getattr(child, "viewport", lambda: None)()
+            if viewport is not None:
+                viewport.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+                viewport.installEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:
+        if event.type() == QEvent.Type.Wheel:
+            event.accept()
+            return True
+        if event.type() == QEvent.Type.KeyPress and event.key() in _CALENDAR_BLOCKED_KEYS:
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
 
     def wheelEvent(self, event) -> None:
         event.accept()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in _CALENDAR_BLOCKED_KEYS:
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def paintCell(self, painter: QPainter, rect, date_value: QDate) -> None:
         if date_value.year() != self.year or date_value.month() != self.month:
