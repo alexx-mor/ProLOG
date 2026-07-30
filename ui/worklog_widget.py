@@ -157,11 +157,16 @@ class WorkLogWidget(QWidget):
         if employee:
             self.employee_name.setText(self._employee_info_text("Сотрудник", employee.full_name))
             self.employee_position.setText(self._employee_info_text("Должность", employee.position or "-"))
-            self.employee_category.setText(self._employee_info_text("Категория", employee.category or "-"))
+            rank_title = (
+                "Категория"
+                if "инженер" in employee.position.casefold() and "асутп" in employee.position.casefold()
+                else "Разряд"
+            )
+            self.employee_category.setText(self._employee_info_text(rank_title, employee.category or "-"))
         else:
             self.employee_name.setText(self._employee_info_text("Сотрудник", "не выбран"))
             self.employee_position.setText(self._employee_info_text("Должность", "-"))
-            self.employee_category.setText(self._employee_info_text("Категория", "-"))
+            self.employee_category.setText(self._employee_info_text("Разряд", "-"))
 
     def set_directories(self, locations, objects, work_types, products=None) -> None:
         current_product_id = self.product.currentData()

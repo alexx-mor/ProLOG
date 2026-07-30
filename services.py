@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 
 from analytics import AnalyticsResult, build_analytics
-from category_rules import category_values_from_rule, normalize_employee_category
+from category_rules import STUDENT_CATEGORY, category_values_from_rule, normalize_employee_category
 from directory_files import load_position_category_map
 from database import DirectoryRepository, EmployeeRepository, WorkLogRepository
 from models import Employee, ProductItem, WorkCalendarDay, WorkLogEntry
@@ -78,6 +78,15 @@ class DirectoryService:
     def delete(self, key: str, item_id: int) -> None:
         self.repository.delete(key, item_id)
 
+    def move(self, key: str, item_id: int, direction: int) -> None:
+        self.repository.move(key, item_id, direction)
+
+    def ui_setting(self, key: str, default: str = "") -> str:
+        return self.repository.ui_setting(key, default)
+
+    def set_ui_setting(self, key: str, value: str) -> None:
+        self.repository.set_ui_setting(key, value)
+
     def list_calendar_days(
         self,
         date_from: date | None = None,
@@ -115,6 +124,9 @@ class DirectoryService:
 
     def delete_product(self, product_id: int) -> None:
         self.repository.delete_product(product_id)
+
+    def move_product(self, product_id: int, direction: int) -> None:
+        self.repository.move_product(product_id, direction)
 
     def list_pay_rates(self):
         return self.repository.list_pay_rates()
@@ -198,16 +210,18 @@ class EmployeeService:
         rule = self.directories.category_for_position(employee.position)
         allowed = category_values_from_rule(rule)
         if self.directories.student_allowed_for_position(employee.position):
-            allowed = ["0 (студент)", *allowed]
+            allowed = [STUDENT_CATEGORY, *allowed]
         if not allowed:
             return
         category = employee.category.strip()
+        field_name = "категорию" if _is_asutp_engineer(employee.position) else "разряд"
+        title_name = "Категория" if _is_asutp_engineer(employee.position) else "Разряд"
         if not category:
-            raise ValueError(f"Укажите категорию сотрудника для должности '{employee.position}'")
+            raise ValueError(f"Укажите {field_name} сотрудника для должности '{employee.position}'")
         if category not in allowed:
             allowed_text = ", ".join(allowed)
             raise ValueError(
-                f"Категория '{category}' не подходит для должности '{employee.position}'. "
+                f"{title_name} '{category}' не подходит для должности '{employee.position}'. "
                 f"Допустимо: {allowed_text}"
             )
 
@@ -233,6 +247,11 @@ def is_student_category_allowed(position: str) -> bool:
         "слесарь кипиа",
     )
     return normalized in allowed_positions
+
+
+def _is_asutp_engineer(position: str) -> bool:
+    normalized = position.strip().casefold()
+    return "инженер" in normalized and "асутп" in normalized
 
 
 class WorkLogService:

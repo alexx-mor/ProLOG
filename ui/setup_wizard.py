@@ -105,14 +105,14 @@ class _EmployeeSetupPage(QWidget):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         text = QLabel(
             "Для начала работы добавьте сотрудников вручную или импортируйте Excel-файл "
-            "с колонками: №, ФИО, Должность, Категория. Позже сотрудников можно будет "
+            "с колонками: №, ФИО, Должность, Разряд. Позже сотрудников можно будет "
             "добавлять, корректировать и удалять в основном окне."
         )
         text.setObjectName("WizardSubtitle")
         text.setWordWrap(True)
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["ФИО", "Должность", "Категория"])
+        self.table.setHorizontalHeaderLabels(["ФИО", "Должность", "Разряд/категория"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
@@ -220,17 +220,19 @@ class _DirectorySetupPage(QWidget):
         self.items = self.directories.list_all(self.key)
         if self.key == "positions":
             self.table.setColumnCount(5)
-            self.table.setHorizontalHeaderLabels(["Должность", "Кат.", "0", "Группа", "Статус"])
+            self.table.setHorizontalHeaderLabels(
+                ["Должность", "Категории/разряды", "Ученик/стажер", "Группа", "Статус"]
+            )
             self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
             self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(0, 500)
-            self.table.setColumnWidth(1, 58)
-            self.table.setColumnWidth(2, 42)
-            self.table.setColumnWidth(3, 82)
-            self.table.setColumnWidth(4, 92)
+            self.table.setColumnWidth(0, 400)
+            self.table.setColumnWidth(1, 170)
+            self.table.setColumnWidth(2, 140)
+            self.table.setColumnWidth(3, 120)
+            self.table.setColumnWidth(4, 100)
         else:
             self.table.setColumnCount(2)
             self.table.setHorizontalHeaderLabels(["Название", "Статус"])

@@ -9,7 +9,13 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Iterator
 
-from category_rules import NO_CATEGORY, normalize_pay_category, pay_categories_for_position
+from category_rules import (
+    LEGACY_STUDENT_CATEGORY,
+    NO_CATEGORY,
+    STUDENT_CATEGORY,
+    normalize_pay_category,
+    pay_categories_for_position,
+)
 from constants import DATABASE_FILE
 from directory_files import (
     department_names_match,
@@ -106,10 +112,38 @@ class Database:
         for column, default in object_defaults.items():
             if column not in object_columns:
                 connection.execute(f"ALTER TABLE Objects ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'")
+        if "sort_order" not in object_columns:
+            connection.execute("ALTER TABLE Objects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        product_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Products)")}
+        if "sort_order" not in product_columns:
+            connection.execute("ALTER TABLE Products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
         worklog_columns = {row["name"] for row in connection.execute("PRAGMA table_info(WorkLogEntries)")}
         if "product_id" not in worklog_columns:
             connection.execute("ALTER TABLE WorkLogEntries ADD COLUMN product_id INTEGER REFERENCES Products(id)")
         connection.execute("UPDATE Positions SET category = '—', student_allowed = 0 WHERE name = 'Мастер чистоты'")
+        connection.execute(
+            """
+            DELETE FROM PayRates
+            WHERE category = ?
+              AND EXISTS (
+                  SELECT 1
+                  FROM PayRates current
+                  WHERE current.position_id = PayRates.position_id
+                    AND current.category = ?
+              )
+            """,
+            (LEGACY_STUDENT_CATEGORY, STUDENT_CATEGORY),
+        )
+        connection.execute(
+            "UPDATE PayRates SET category = ? WHERE category = ?",
+            (STUDENT_CATEGORY, LEGACY_STUDENT_CATEGORY),
+        )
+        connection.execute(
+            "UPDATE Employees SET category = ? WHERE category = ?",
+            (STUDENT_CATEGORY, LEGACY_STUDENT_CATEGORY),
+        )
+        self._normalize_sort_order(connection, "Objects", "name COLLATE NOCASE, id")
+        self._normalize_product_sort_order(connection)
         self._sync_pay_rates(connection)
 
     def _seed(self, connection: sqlite3.Connection) -> None:
@@ -132,10 +166,19 @@ class Database:
                         (value, existing_id),
                     )
                 else:
-                    cursor = connection.execute(
-                        f"INSERT INTO {table} (name) VALUES (?)",
-                        (value,),
-                    )
+                    if table == "Objects":
+                        cursor = connection.execute(
+                            """
+                            INSERT INTO Objects (name, sort_order)
+                            VALUES (?, COALESCE((SELECT MAX(sort_order) + 1 FROM Objects), 1))
+                            """,
+                            (value,),
+                        )
+                    else:
+                        cursor = connection.execute(
+                            f"INSERT INTO {table} (name) VALUES (?)",
+                            (value,),
+                        )
                     existing[value.casefold()] = cursor.lastrowid
         self._seed_positions(connection)
 
@@ -165,6 +208,36 @@ class Database:
                 )
                 existing_positions[position.name.casefold()] = cursor.lastrowid
         self._sync_pay_rates(connection)
+
+    def _normalize_sort_order(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        fallback_order: str,
+        where_sql: str = "",
+        params: tuple[object, ...] = (),
+    ) -> None:
+        sql = f"SELECT id FROM {table}"
+        if where_sql:
+            sql += f" WHERE {where_sql}"
+        sql += f" ORDER BY CASE WHEN sort_order > 0 THEN 0 ELSE 1 END, sort_order, {fallback_order}"
+        rows = connection.execute(sql, params).fetchall()
+        for index, row in enumerate(rows, start=1):
+            connection.execute(
+                f"UPDATE {table} SET sort_order = ? WHERE id = ?",
+                (index, row["id"]),
+            )
+
+    def _normalize_product_sort_order(self, connection: sqlite3.Connection) -> None:
+        object_rows = connection.execute("SELECT DISTINCT object_id FROM Products").fetchall()
+        for row in object_rows:
+            self._normalize_sort_order(
+                connection,
+                "Products",
+                "name COLLATE NOCASE, serial_number COLLATE NOCASE, id",
+                "object_id = ?",
+                (row["object_id"],),
+            )
 
     def _sync_pay_rates(self, connection: sqlite3.Connection) -> None:
         rows = connection.execute(
@@ -220,6 +293,8 @@ class DirectoryRepository:
         sql = f"SELECT {fields} FROM {table}"
         if active_only:
             sql += " WHERE is_active = 1"
+        if table_key == "objects":
+            sql += " ORDER BY sort_order, name COLLATE NOCASE, id"
         with self.database.connect() as connection:
             items = [
                 DirectoryItem(
@@ -243,6 +318,8 @@ class DirectoryRepository:
                 )
                 for row in connection.execute(sql)
             ]
+        if table_key == "objects":
+            return items
         return sorted(items, key=lambda item: item.name.casefold())
 
     def rename(self, table_key: str, item_id: int, name: str) -> None:
@@ -261,6 +338,28 @@ class DirectoryRepository:
                     "UPDATE Positions SET employee_group = ? WHERE employee_group = ?",
                     (normalized, old_name),
                 )
+
+    def move(self, table_key: str, item_id: int, direction: int) -> None:
+        if table_key != "objects":
+            raise ValueError("Ручной порядок поддерживается только для объектов и изделий")
+        with self.database.connect() as connection:
+            self._move_ordered_row(connection, "Objects", item_id, direction)
+
+    def ui_setting(self, key: str, default: str = "") -> str:
+        with self.database.connect() as connection:
+            row = connection.execute("SELECT value FROM Settings WHERE key = ?", (key,)).fetchone()
+        return str(row["value"]) if row else default
+
+    def set_ui_setting(self, key: str, value: str) -> None:
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO Settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
 
     def upsert(self, table_key: str, name: str) -> int:
         table = self._table(table_key)
@@ -303,6 +402,15 @@ class DirectoryRepository:
                         """,
                         (normalized, category, student_allowed, salary, salary_type, group),
                     )
+            elif table_key == "objects":
+                connection.execute(
+                    """
+                    INSERT INTO Objects (name, is_active, sort_order)
+                    VALUES (?, 1, COALESCE((SELECT MAX(sort_order) + 1 FROM Objects), 1))
+                    ON CONFLICT(name) DO UPDATE SET is_active = 1
+                    """,
+                    (normalized,),
+                )
             else:
                 connection.execute(
                     f"INSERT INTO {table} (name, is_active) VALUES (?, 1) "
@@ -494,7 +602,7 @@ class DirectoryRepository:
         """
         if active_only:
             sql += " WHERE p.is_active = 1"
-        sql += " ORDER BY o.name COLLATE NOCASE, p.name COLLATE NOCASE, p.serial_number COLLATE NOCASE"
+        sql += " ORDER BY o.sort_order, o.name COLLATE NOCASE, p.sort_order, p.name COLLATE NOCASE, p.id"
         with self.database.connect() as connection:
             return [_map_product(row) for row in connection.execute(sql)]
 
@@ -506,6 +614,11 @@ class DirectoryRepository:
         readiness = max(0, min(100, int(product.readiness_percent or 0)))
         with self.database.connect() as connection:
             if product.id:
+                current = connection.execute(
+                    "SELECT object_id FROM Products WHERE id = ?",
+                    (product.id,),
+                ).fetchone()
+                object_changed = current is not None and current["object_id"] != product.object_id
                 connection.execute(
                     """
                     UPDATE Products
@@ -533,14 +646,33 @@ class DirectoryRepository:
                         product.id,
                     ),
                 )
+                if object_changed:
+                    connection.execute(
+                        """
+                        UPDATE Products
+                        SET sort_order = COALESCE(
+                            (
+                                SELECT MAX(other.sort_order) + 1
+                                FROM Products other
+                                WHERE other.object_id = ? AND other.id <> ?
+                            ),
+                            1
+                        )
+                        WHERE id = ?
+                        """,
+                        (product.object_id, product.id, product.id),
+                    )
                 return product.id
             cursor = connection.execute(
                 """
                 INSERT INTO Products (
                     object_id, serial_number, name, code, product_status,
-                    readiness_percent, start_date, release_date, is_active
+                    readiness_percent, start_date, release_date, is_active, sort_order
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    COALESCE((SELECT MAX(sort_order) + 1 FROM Products WHERE object_id = ?), 1)
+                )
                 """,
                 (
                     product.object_id,
@@ -552,6 +684,7 @@ class DirectoryRepository:
                     product.start_date.strip(),
                     product.release_date.strip(),
                     int(product.is_active),
+                    product.object_id,
                 ),
             )
             return int(cursor.lastrowid)
@@ -563,6 +696,71 @@ class DirectoryRepository:
     def delete_product(self, product_id: int) -> None:
         with self.database.connect() as connection:
             connection.execute("DELETE FROM Products WHERE id = ?", (product_id,))
+
+    def move_product(self, product_id: int, direction: int) -> None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT object_id FROM Products WHERE id = ?",
+                (product_id,),
+            ).fetchone()
+            if row is None:
+                return
+            self._move_ordered_row(
+                connection,
+                "Products",
+                product_id,
+                direction,
+                scope_column="object_id",
+                scope_value=row["object_id"],
+            )
+
+    def _move_ordered_row(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        item_id: int,
+        direction: int,
+        scope_column: str = "",
+        scope_value: object | None = None,
+    ) -> None:
+        if direction not in (-1, 1):
+            raise ValueError("Направление перемещения должно быть -1 или 1")
+        where_sql = f"{scope_column} = ?" if scope_column else ""
+        params = (scope_value,) if scope_column else ()
+        fallback = "name COLLATE NOCASE, id"
+        self.database._normalize_sort_order(connection, table, fallback, where_sql, params)
+        row = connection.execute(
+            f"SELECT id, sort_order FROM {table} WHERE id = ?",
+            (item_id,),
+        ).fetchone()
+        if row is None:
+            return
+        comparison = "<" if direction < 0 else ">"
+        ordering = "DESC" if direction < 0 else "ASC"
+        scope_clause = f" AND {scope_column} = ?" if scope_column else ""
+        neighbor_params: tuple[object, ...] = (row["sort_order"],)
+        if scope_column:
+            neighbor_params += (scope_value,)
+        neighbor = connection.execute(
+            f"""
+            SELECT id, sort_order
+            FROM {table}
+            WHERE sort_order {comparison} ?{scope_clause}
+            ORDER BY sort_order {ordering}, id {ordering}
+            LIMIT 1
+            """,
+            neighbor_params,
+        ).fetchone()
+        if neighbor is None:
+            return
+        connection.execute(
+            f"UPDATE {table} SET sort_order = ? WHERE id = ?",
+            (neighbor["sort_order"], row["id"]),
+        )
+        connection.execute(
+            f"UPDATE {table} SET sort_order = ? WHERE id = ?",
+            (row["sort_order"], neighbor["id"]),
+        )
 
     def list_pay_rates(self) -> list[PayRate]:
         with self.database.connect() as connection:
@@ -978,7 +1176,8 @@ CREATE TABLE IF NOT EXISTS Objects (
     signed_date TEXT NOT NULL DEFAULT '',
     due_date TEXT NOT NULL DEFAULT '',
     object_status TEXT NOT NULL DEFAULT 'В работе',
-    is_active INTEGER NOT NULL DEFAULT 1
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS Products (
@@ -991,7 +1190,8 @@ CREATE TABLE IF NOT EXISTS Products (
     readiness_percent INTEGER NOT NULL DEFAULT 0,
     start_date TEXT NOT NULL DEFAULT '',
     release_date TEXT NOT NULL DEFAULT '',
-    is_active INTEGER NOT NULL DEFAULT 1
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS WorkTypes (

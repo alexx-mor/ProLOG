@@ -1,5 +1,31 @@
 ﻿# Changelog
 
+## 2026-07-30 - Directory ordering and terminology
+
+### Added
+
+- Added persistent manual ordering for objects and products with `Вверх` and `Вниз` buttons and context-menu actions.
+- Added SQLite migration for object and product order; products keep an independent order inside each object.
+- Added persistent per-directory storage for the `Показывать неактивные` setting.
+
+### Changed
+
+- Normalized directory icons to one fixed canvas so all navigation labels start on the same vertical line.
+- Removed alternating cell colors from the payment editing dialog.
+- Payment table column widths now survive data saving and refreshes.
+- Renamed payment columns to `КТУ командировка ближняя`, `КТУ воскр./празд.` and `КТУ Суббота`.
+- Renamed position columns to `Категории/разряды` and `Ученик/стажер`.
+- Replaced the visible student wording with `ученик/стажер`; existing database values are migrated automatically.
+- Updated employee, report-entry, analytics, setup and Excel labels to use rank terminology, retaining category wording for ASUTP engineers.
+
+### Verified
+
+- Python syntax check passed for all changed modules.
+- SQLite smoke test passed for migration, manual object/product order and persisted UI settings.
+- Qt smoke test passed for payment column-width retention, persisted inactive filters and employee dialog terminology.
+- Rebuilt the portable Windows executable with Python `3.12.13` and PyInstaller `6.21.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - Authorization polish and directory icons
 
 ### Added

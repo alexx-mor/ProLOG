@@ -50,7 +50,7 @@ def export_employees(path: Path, employees: list[Employee]) -> Path:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Сотрудники"
-    _write_header(sheet, ["№", "ФИО", "Должность", "Категория"])
+    _write_header(sheet, ["№", "ФИО", "Должность", "Разряд"])
     for row_index, employee in enumerate(employees, start=2):
         sheet.append(
             [

@@ -214,9 +214,10 @@ class EmployeeDialog(QDialog):
         layout = QFormLayout(self)
         layout.addRow("ФИО", self.full_name)
         layout.addRow("Должность", self.position)
-        layout.addRow("Категория", self.category)
+        layout.addRow("Разряд", self.category)
         layout.addRow(buttons)
-        self.position.currentTextChanged.connect(lambda _text: self._sync_categories(self.category.currentText()))
+        self.position.currentTextChanged.connect(lambda _text: self._position_changed(layout))
+        self._position_changed(layout)
 
     def employee(self, employee_id: int | None = None) -> Employee:
         return Employee(
@@ -230,7 +231,7 @@ class EmployeeDialog(QDialog):
         position = self.position_items.get(self.position.currentText().strip())
         allowed = category_values_from_rule(position.category if position else "")
         if position and position.student_allowed:
-            allowed = ["0 (студент)", *allowed]
+            allowed = [STUDENT_CATEGORY, *allowed]
         self.category.blockSignals(True)
         self.category.clear()
         if allowed:
@@ -242,6 +243,12 @@ class EmployeeDialog(QDialog):
             self.category.addItem("")
             self.category.setEnabled(False)
         self.category.blockSignals(False)
+
+    def _position_changed(self, layout: QFormLayout) -> None:
+        self._sync_categories(self.category.currentText())
+        label = layout.labelForField(self.category)
+        if label:
+            label.setText("Категория" if _is_asutp_engineer(self.position.currentText()) else "Разряд")
 
 
 class PositionDialog(QDialog):
@@ -260,7 +267,7 @@ class PositionDialog(QDialog):
         self.name = QLineEdit(position.name if position else "")
         self.category = QComboBox()
         self.category.addItems(self.CATEGORY_RULES)
-        self.student_allowed = QCheckBox("Разрешить категорию 0 (студент)")
+        self.student_allowed = QCheckBox("Разрешить разряд 0 (ученик/стажер)")
         self.salary = QLineEdit(position.salary if position else "")
         self.salary_type = QComboBox()
         self.salary_type.addItem("Ставка", "hourly")
@@ -298,7 +305,7 @@ class PositionDialog(QDialog):
         buttons.addWidget(cancel_button)
         layout = QFormLayout(self)
         layout.addRow("Название", self.name)
-        layout.addRow("Категории", self.category)
+        layout.addRow("Категории/разряды", self.category)
         layout.addRow("", self.student_allowed)
         layout.addRow("Группа", self.group)
         layout.addRow("Статус", self.status_label)
@@ -696,7 +703,7 @@ class PayRateDialog(QDialog):
         layout = QFormLayout(self)
         layout.addRow("Тип оплаты", self.salary_type)
         layout.addRow(self.table)
-        layout.addRow("КТУ КБ (ближняя командировка)", self.near_trip_coeff)
+        layout.addRow("КТУ командировка ближняя", self.near_trip_coeff)
         layout.addRow("КТУ воскр. и праздники", self.holiday_coeff)
         layout.addRow("КТУ суббота", self.saturday_coeff)
         layout.addRow(buttons)
@@ -707,7 +714,7 @@ class PayRateDialog(QDialog):
             position = QTableWidgetItem(self.group.position_name if row == 0 else "")
             position.setFlags(position.flags() & ~Qt.ItemFlag.ItemIsEditable)
             position.setToolTip(self.group.position_name)
-            category_item = QTableWidgetItem(_pay_category_row_title(category))
+            category_item = QTableWidgetItem(_pay_category_row_title(category, self.group.position_name))
             category_item.setFlags(category_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             category_item.setToolTip(category_item.text())
             amount_item = QTableWidgetItem(self.group.rates[category].salary)
@@ -718,8 +725,6 @@ class PayRateDialog(QDialog):
             self.table.setItem(row, 1, category_item)
             self.table.setItem(row, 2, amount_item)
             self.table.setItem(row, 3, far_trip_item)
-            for column in range(self.table.columnCount()):
-                self.table.item(row, column).setBackground(QColor("#eaf4fb" if row % 2 == 0 else "#fff2e8"))
         if len(self.category_rows) > 1:
             self.table.setSpan(0, 0, len(self.category_rows), 1)
         self.table.resizeRowsToContents()
@@ -782,7 +787,12 @@ class DirectoryDialog(QDialog):
         if not can_edit_pay_rates:
             self.directory_labels.pop("pay_rates", None)
         self.current_key = initial_key if initial_key in self.directory_labels else next(iter(self.directory_labels))
-        self._show_inactive_by_key = {key: True for key in self.directory_labels}
+        self._show_inactive_by_key = {
+            key: self.directory_service.ui_setting(f"directory/show_inactive/{key}", "1") == "1"
+            for key in self.directory_labels
+        }
+        self._column_widths_by_key: dict[str, list[int]] = {}
+        self._configured_key = ""
         self.navigation = QListWidget()
         self.navigation.setFixedWidth(285)
         self.navigation.setIconSize(QSize(22, 22))
@@ -825,6 +835,8 @@ class DirectoryDialog(QDialog):
         self.disable_button = QPushButton("Отключить")
         self.restore_button = QPushButton("Активировать")
         self.delete_button = QPushButton("Удалить")
+        self.move_up_button = QPushButton("Вверх")
+        self.move_down_button = QPushButton("Вниз")
         self.close_button = QPushButton("Закрыть")
         self._items = []
         self._row_items = []
@@ -834,8 +846,12 @@ class DirectoryDialog(QDialog):
         self.refresh()
 
     def refresh(self) -> None:
+        if self._configured_key == self.current_key:
+            self._remember_column_widths()
         self.title_label.setText(self.DIRECTORY_TITLES.get(self.current_key, "Справочник"))
         self._configure_table()
+        self._restore_column_widths()
+        self._configured_key = self.current_key
         self._update_button_visibility()
         needle = self.search.text().strip().casefold()
         if self.current_key == "pay_rates":
@@ -946,7 +962,7 @@ class DirectoryDialog(QDialog):
                 current_row = row + offset
                 self._row_items.append(group)
                 rate = group.rates.get(category)
-                category_cell = QTableWidgetItem(_pay_category_row_title(category))
+                category_cell = QTableWidgetItem(_pay_category_row_title(category, group.position_name))
                 category_cell.setToolTip(category_cell.text())
                 salary_value = _format_money(rate.salary) if rate else "—"
                 salary = QTableWidgetItem(salary_value)
@@ -1140,7 +1156,15 @@ class DirectoryDialog(QDialog):
         calendar_layout.addLayout(calendar_editor)
 
         buttons = QHBoxLayout()
-        for button in (self.add_button, self.rename_button, self.disable_button, self.restore_button, self.delete_button):
+        for button in (
+            self.add_button,
+            self.rename_button,
+            self.disable_button,
+            self.restore_button,
+            self.delete_button,
+            self.move_up_button,
+            self.move_down_button,
+        ):
             buttons.addWidget(button)
         buttons.addStretch()
         buttons.addWidget(self.close_button)
@@ -1167,6 +1191,8 @@ class DirectoryDialog(QDialog):
         self.disable_button.clicked.connect(lambda: self._set_active(False))
         self.restore_button.clicked.connect(lambda: self._set_active(True))
         self.delete_button.clicked.connect(self._delete_item)
+        self.move_up_button.clicked.connect(lambda: self._move_selected(-1))
+        self.move_down_button.clicked.connect(lambda: self._move_selected(1))
         self.close_button.clicked.connect(self.accept)
         self.table.doubleClicked.connect(self._toggle_selected_active)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
@@ -1185,6 +1211,7 @@ class DirectoryDialog(QDialog):
     def _navigation_changed(self, row: int) -> None:
         keys = list(self.directory_labels)
         if 0 <= row < len(keys):
+            self._remember_column_widths()
             self.current_key = keys[row]
             self.search.blockSignals(True)
             self.search.clear()
@@ -1199,6 +1226,10 @@ class DirectoryDialog(QDialog):
 
     def _show_inactive_changed(self, checked: bool) -> None:
         self._show_inactive_by_key[self.current_key] = checked
+        self.directory_service.set_ui_setting(
+            f"directory/show_inactive/{self.current_key}",
+            "1" if checked else "0",
+        )
         self.refresh()
 
     def _selected_id(self) -> int | None:
@@ -1436,6 +1467,28 @@ class DirectoryDialog(QDialog):
             return
         self.refresh()
 
+    def _move_selected(self, direction: int) -> None:
+        if self.current_key not in {"objects", "products"}:
+            return
+        item_id = self._selected_id()
+        if item_id is None:
+            self._info("Выберите строку")
+            return
+        if self.current_key == "products":
+            self.directory_service.move_product(item_id, direction)
+        else:
+            self.directory_service.move(self.current_key, item_id, direction)
+        self.refresh()
+        self._select_row_by_id(item_id)
+
+    def _select_row_by_id(self, item_id: int) -> None:
+        for row in range(self.table.rowCount()):
+            cell = self.table.item(row, 0)
+            if cell and cell.data(Qt.ItemDataRole.UserRole) == item_id:
+                self.table.selectRow(row)
+                self.table.scrollToItem(cell)
+                return
+
     def _toggle_selected_active(self) -> None:
         row = self.table.currentRow()
         max_rows = len(self._row_items) if self.current_key == "pay_rates" else len(self._items)
@@ -1450,6 +1503,8 @@ class DirectoryDialog(QDialog):
         disable_action = QAction("Отключить", self)
         restore_action = QAction("Активировать", self)
         delete_action = QAction("Удалить", self)
+        move_up_action = QAction("Переместить вверх", self)
+        move_down_action = QAction("Переместить вниз", self)
         has_item = self._selected_id() is not None
         if self.current_key == "pay_rates":
             rename_action.setEnabled(has_item)
@@ -1461,13 +1516,21 @@ class DirectoryDialog(QDialog):
             return
         for action in (rename_action, disable_action, restore_action, delete_action):
             action.setEnabled(has_item)
+        move_up_action.setEnabled(has_item)
+        move_down_action.setEnabled(has_item)
         add_action.triggered.connect(self._add_item)
         rename_action.triggered.connect(self._rename_item)
         disable_action.triggered.connect(lambda: self._set_active(False))
         restore_action.triggered.connect(lambda: self._set_active(True))
         delete_action.triggered.connect(self._delete_item)
+        move_up_action.triggered.connect(lambda: self._move_selected(-1))
+        move_down_action.triggered.connect(lambda: self._move_selected(1))
         menu.addAction(add_action)
         menu.addAction(rename_action)
+        if self.current_key in {"objects", "products"}:
+            menu.addSeparator()
+            menu.addAction(move_up_action)
+            menu.addAction(move_down_action)
         menu.addSeparator()
         menu.addAction(disable_action)
         menu.addAction(restore_action)
@@ -1479,17 +1542,19 @@ class DirectoryDialog(QDialog):
         self.table.clearSpans()
         if self.current_key == "positions":
             self.table.setColumnCount(5)
-            self.table.setHorizontalHeaderLabels(["Должность", "Кат.", "0", "Группа", "Статус"])
+            self.table.setHorizontalHeaderLabels(
+                ["Должность", "Категории/разряды", "Ученик/стажер", "Группа", "Статус"]
+            )
             self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
             self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
             self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-            self.table.setColumnWidth(0, 500)
-            self.table.setColumnWidth(1, 58)
-            self.table.setColumnWidth(2, 42)
-            self.table.setColumnWidth(3, 82)
-            self.table.setColumnWidth(4, 92)
+            self.table.setColumnWidth(0, 400)
+            self.table.setColumnWidth(1, 170)
+            self.table.setColumnWidth(2, 140)
+            self.table.setColumnWidth(3, 120)
+            self.table.setColumnWidth(4, 100)
         elif self.current_key == "pay_rates":
             self.table.setColumnCount(8)
             self.table.setHorizontalHeaderLabels(
@@ -1499,26 +1564,21 @@ class DirectoryDialog(QDialog):
                     "Тип",
                     "Ставка/зарплата",
                     "Командировка дальняя",
-                    "КТУ КБ",
-                    "Воскр./празд.",
-                    "Суббота",
+                    "КТУ командировка ближняя",
+                    "КТУ воскр./празд.",
+                    "КТУ Суббота",
                 ]
             )
-            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-            for column in range(5, 8):
-                self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            for column in range(8):
+                self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
             self.table.setColumnWidth(0, 280)
             self.table.setColumnWidth(1, 150)
             self.table.setColumnWidth(2, 92)
             self.table.setColumnWidth(3, 130)
             self.table.setColumnWidth(4, 165)
-            self.table.setColumnWidth(5, 78)
-            self.table.setColumnWidth(6, 112)
-            self.table.setColumnWidth(7, 82)
+            self.table.setColumnWidth(5, 205)
+            self.table.setColumnWidth(6, 155)
+            self.table.setColumnWidth(7, 120)
         elif self.current_key == "objects":
             self.table.setColumnCount(11)
             self.table.setHorizontalHeaderLabels(
@@ -1592,6 +1652,20 @@ class DirectoryDialog(QDialog):
             self.table.setColumnWidth(1, 130)
         self.table.horizontalHeader().setStretchLastSection(False)
 
+    def _remember_column_widths(self) -> None:
+        if not self._configured_key or self.table.columnCount() <= 0:
+            return
+        self._column_widths_by_key[self._configured_key] = [
+            self.table.columnWidth(column) for column in range(self.table.columnCount())
+        ]
+
+    def _restore_column_widths(self) -> None:
+        widths = self._column_widths_by_key.get(self.current_key, [])
+        if len(widths) != self.table.columnCount():
+            return
+        for column, width in enumerate(widths):
+            self.table.setColumnWidth(column, width)
+
     def _status_column(self) -> int:
         if self.current_key == "positions":
             return 4
@@ -1615,6 +1689,9 @@ class DirectoryDialog(QDialog):
         self.disable_button.setVisible(not is_pay_rates and not is_calendar)
         self.restore_button.setVisible(not is_pay_rates and not is_calendar)
         self.delete_button.setVisible(not is_pay_rates and not is_calendar)
+        is_ordered = self.current_key in {"objects", "products"}
+        self.move_up_button.setVisible(is_ordered)
+        self.move_down_button.setVisible(is_ordered)
 
     def _info(self, message: str) -> None:
         box = QMessageBox(self)
@@ -1666,7 +1743,20 @@ def _status_icon(color: str) -> QIcon:
 def _directory_icon(key: str) -> QIcon:
     icon_file = DIRECTORY_ICONS_DIR / f"{key}.png"
     if icon_file.exists():
-        return QIcon(str(icon_file))
+        source = QPixmap(str(icon_file))
+        if not source.isNull():
+            canvas = QPixmap(24, 24)
+            canvas.fill(Qt.GlobalColor.transparent)
+            scaled = source.scaled(
+                22,
+                22,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            painter = QPainter(canvas)
+            painter.drawPixmap((24 - scaled.width()) // 2, (24 - scaled.height()) // 2, scaled)
+            painter.end()
+            return QIcon(canvas)
     colors = {
         "locations": "#2f80ed",
         "work_types": "#7c5cc4",
@@ -1753,18 +1843,24 @@ def _pay_rate_row_categories(group: PayRateGroup) -> list[str]:
 
 def _pay_category_title(category: str) -> str:
     if category == STUDENT_CATEGORY:
-        return "Категория 0"
+        return "Ученик/стажер"
     if category == NO_CATEGORY:
-        return "Без категории"
-    return f"Категория {category}"
+        return "Без разряда"
+    return f"Разряд {category}"
 
 
-def _pay_category_row_title(category: str) -> str:
+def _pay_category_row_title(category: str, position_name: str = "") -> str:
     if category == STUDENT_CATEGORY:
-        return "Разряд 0 / ученик"
+        return "Ученик/стажер"
     if category == NO_CATEGORY:
         return "—"
-    return f"Разряд {category}"
+    title = "Категория" if _is_asutp_engineer(position_name) else "Разряд"
+    return f"{title} {category}"
+
+
+def _is_asutp_engineer(position: str) -> bool:
+    normalized = position.strip().casefold()
+    return "инженер" in normalized and "асутп" in normalized
 
 
 def _format_money(value: str) -> str:
@@ -2090,7 +2186,7 @@ HELP_HTML = f"""
 рабочие дни, выходные, праздники и рабочие субботы. Эти настройки используются
 во вкладке <b>Аналитика</b> при расчете часов и оплаты.</p>
 <h3>Импорт сотрудников</h3>
-<p>Excel-файл должен содержать колонки: №, ФИО, Должность, Категория.</p>
+<p>Excel-файл должен содержать колонки: №, ФИО, Должность, Разряд.</p>
 <h3>Импорт старых отчетов</h3>
 <p>После завершения мастера настройки используйте <b>Файл - Импорт старых отчетов Excel</b>.
 Перед переносом программа покажет ошибки, пропущенные дни, неизвестных сотрудников и новые объекты.</p>

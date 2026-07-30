@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-STUDENT_CATEGORY = "0 (студент)"
+STUDENT_CATEGORY = "0 (ученик/стажер)"
+LEGACY_STUDENT_CATEGORY = "0 (студент)"
 NO_CATEGORY = "—"
 
 
@@ -30,7 +31,15 @@ def pay_categories_for_position(rule: str, student_allowed: bool) -> list[str]:
 
 def normalize_employee_category(value: str) -> str:
     stripped = value.strip()
-    if stripped == "0":
+    if stripped.casefold() in {
+        "0",
+        "студент",
+        "ученик",
+        "стажер",
+        "ученик/стажер",
+        LEGACY_STUDENT_CATEGORY,
+        STUDENT_CATEGORY,
+    }:
         return STUDENT_CATEGORY
     return "" if stripped in {"", "-", NO_CATEGORY} else stripped
 

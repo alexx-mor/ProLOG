@@ -46,7 +46,7 @@ class EmployeeWidget(QWidget):
         self.position_filter.addItem("Все должности", "")
         self.position_filter.setView(QListView())
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["ФИО", "Должность", "Категория"])
+        self.table.setHorizontalHeaderLabels(["ФИО", "Должность", "Разряд/категория"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(2, 90)
