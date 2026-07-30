@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
     QHeaderView,
 )
 
@@ -28,11 +29,15 @@ class RegistrationDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Регистрация ProLOG")
-        self.setMinimumWidth(620)
+        self.setMinimumWidth(880)
         self.organization = QLineEdit()
         self.department = QLineEdit()
         self.leader = QLineEdit()
         self.user = QLineEdit()
+        self.organization.setPlaceholderText('ООО "Компания"')
+        self.department.setPlaceholderText("АСУТП")
+        self.leader.setPlaceholderText("Иванов Иван Иванович")
+        self.user.setPlaceholderText("Иванов Иван Иванович")
         self.user_is_leader = QCheckBox("Пользователь является руководителем")
         self.leader_password = _password_edit()
         self.leader_password_confirm = _password_edit()
@@ -41,6 +46,7 @@ class RegistrationDialog(QDialog):
         self._build_layout()
         self._connect()
         self._sync_user_fields()
+        _fix_dialog_size(self, min_width=880)
 
     def registration_data(self) -> RegistrationData:
         return RegistrationData(
@@ -78,15 +84,31 @@ class RegistrationDialog(QDialog):
         subtitle.setWordWrap(True)
         subtitle.setObjectName("WizardSubtitle")
 
-        organization_box = QGroupBox("Организация")
+        organization_box = _auth_group_box("Организация")
         organization_form = QFormLayout(organization_box)
-        organization_form.addRow("Наименование организации", self.organization)
-        organization_form.addRow("Отдел", self.department)
-        organization_form.addRow("Руководитель отдела", self.leader)
+        organization_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        organization_form.setVerticalSpacing(10)
+        organization_form.addRow(
+            "Наименование организации",
+            _field_with_hint(self.organization, 'Например: ООО "Компания", АО "Зима".'),
+        )
+        organization_form.addRow(
+            "Отдел",
+            _field_with_hint(self.department, 'Указывайте без слова "отдел": АСУТП, ЦМК, Производство.'),
+        )
+        organization_form.addRow(
+            "Руководитель отдела",
+            _field_with_hint(self.leader, "Полное ФИО с заглавных букв: Иванов Иван Иванович."),
+        )
 
-        user_box = QGroupBox("Учетные записи")
+        user_box = _auth_group_box("Учетные записи")
         user_form = QFormLayout(user_box)
-        user_form.addRow("Пользователь", self.user)
+        user_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        user_form.setVerticalSpacing(10)
+        user_form.addRow(
+            "Пользователь",
+            _field_with_hint(self.user, "Если создаете отдельного пользователя, укажите полное ФИО с заглавных букв."),
+        )
         user_form.addRow("", self.user_is_leader)
         user_form.addRow("Пароль пользователя", self.user_password)
         user_form.addRow("Повтор пароля пользователя", self.user_password_confirm)
@@ -130,17 +152,28 @@ class RegistrationDialog(QDialog):
 
 
 class LoginDialog(QDialog):
-    def __init__(self, auth_service: AuthService, parent=None, close_app_on_reject: bool = True) -> None:
+    def __init__(
+        self,
+        auth_service: AuthService,
+        parent=None,
+        close_app_on_reject: bool = True,
+        current_session: AuthSession | None = None,
+        allow_user_management: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.auth_service = auth_service
         self.close_app_on_reject = close_app_on_reject
+        self.current_session = current_session
+        self.allow_user_management = allow_user_management
+        self.users_changed = False
         self._session: AuthSession | None = None
         self.setWindowTitle("Авторизация ProLOG")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(560 if current_session else 440)
         self.user = QComboBox()
         self.password = _password_edit()
         self._build_layout()
         self._fill_users()
+        _fix_dialog_size(self, min_width=560 if current_session else 440)
 
     def session(self) -> AuthSession:
         if self._session is None:
@@ -166,33 +199,68 @@ class LoginDialog(QDialog):
         super().accept()
 
     def _build_layout(self) -> None:
-        title = QLabel("Вход в ProLOG")
-        title.setObjectName("DialogTitle")
         form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         form.addRow("Пользователь", self.user)
         form.addRow("Пароль", self.password)
         login_button = QPushButton("Войти")
         exit_button = QPushButton("Выход" if self.close_app_on_reject else "Отмена")
+        users_button = QPushButton("Пользователи")
+        users_button.setVisible(self.allow_user_management and self.current_session is not None)
         login_button.setMinimumWidth(120)
         exit_button.setMinimumWidth(110)
+        users_button.setMinimumWidth(130)
         login_button.clicked.connect(self.accept)
         exit_button.clicked.connect(self.reject)
+        users_button.clicked.connect(self._manage_users)
         buttons = QHBoxLayout()
+        buttons.addWidget(users_button)
         buttons.addStretch()
         buttons.addWidget(login_button)
         buttons.addWidget(exit_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
-        layout.addWidget(title)
-        layout.addLayout(form)
+        if self.current_session is None:
+            title = QLabel("Вход в ProLOG")
+            title.setObjectName("DialogTitle")
+            layout.addWidget(title)
+            layout.addLayout(form)
+        else:
+            layout.addWidget(self._current_profile_box())
+            login_box = _auth_group_box("Смена пользователя")
+            login_box.setLayout(form)
+            layout.addWidget(login_box)
         layout.addLayout(buttons)
 
     def _fill_users(self) -> None:
+        current = self.user.currentData()
         self.user.clear()
         for account in self.auth_service.list_users():
             self.user.addItem(f"{account.username} ({role_label(account.role)})", account.username)
+        index = self.user.findData(current)
+        if index >= 0:
+            self.user.setCurrentIndex(index)
         self.user.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def _current_profile_box(self) -> QGroupBox:
+        profile_box = _auth_group_box("Текущие данные")
+        form = QFormLayout(profile_box)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        if self.current_session is None:
+            return profile_box
+        form.addRow("Организация", _readonly_line(self.current_session.organization_name))
+        form.addRow("Отдел", _readonly_line(self.current_session.department_name))
+        form.addRow("Руководитель", _readonly_line(self.current_session.leader_full_name))
+        return profile_box
+
+    def _manage_users(self) -> None:
+        if self.current_session is None or not self.allow_user_management:
+            return
+        dialog = UserManagementDialog(self.auth_service, self.current_session.username, self)
+        if dialog.exec():
+            self.users_changed = True
+            self._fill_users()
 
 
 class UserDialog(QDialog):
@@ -202,6 +270,7 @@ class UserDialog(QDialog):
         self.setWindowTitle("Пользователь")
         self.setMinimumWidth(480)
         self.username = QLineEdit(account.username if account else "")
+        self.username.setPlaceholderText("Иванов Иван Иванович")
         self.role = QComboBox()
         self.role.addItem(role_label(ROLE_USER), ROLE_USER)
         self.role.addItem(role_label(ROLE_ADMIN), ROLE_ADMIN)
@@ -214,6 +283,7 @@ class UserDialog(QDialog):
             self.password.setPlaceholderText("Оставьте пустым, чтобы не менять")
             self.password_confirm.setPlaceholderText("Оставьте пустым, чтобы не менять")
         self._build_layout()
+        _fix_dialog_size(self, min_width=520)
 
     def values(self) -> tuple[str, str, str]:
         return self.username.text(), str(self.role.currentData() or ROLE_USER), self.password.text()
@@ -232,7 +302,12 @@ class UserDialog(QDialog):
 
     def _build_layout(self) -> None:
         form = QFormLayout()
-        form.addRow("Пользователь", self.username)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        form.setVerticalSpacing(10)
+        form.addRow(
+            "Пользователь",
+            _field_with_hint(self.username, "Укажите полное ФИО с заглавных букв: Иванов Иван Иванович."),
+        )
         form.addRow("Роль", self.role)
         form.addRow("Пароль", self.password)
         form.addRow("Повтор пароля", self.password_confirm)
@@ -272,6 +347,7 @@ class UserManagementDialog(QDialog):
         self._build_layout()
         self._connect()
         self._refresh()
+        self.setFixedSize(680, 430)
 
     def _build_layout(self) -> None:
         title = QLabel("Пользователи ProLOG")
@@ -358,3 +434,34 @@ def _password_edit() -> QLineEdit:
     edit = QLineEdit()
     edit.setEchoMode(QLineEdit.EchoMode.Password)
     return edit
+
+
+def _auth_group_box(title: str) -> QGroupBox:
+    box = QGroupBox(title)
+    box.setObjectName("AuthGroupBox")
+    return box
+
+
+def _field_with_hint(field: QLineEdit, hint: str) -> QWidget:
+    container = QWidget()
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(4)
+    hint_label = QLabel(hint)
+    hint_label.setObjectName("AuthHint")
+    hint_label.setWordWrap(True)
+    layout.addWidget(field)
+    layout.addWidget(hint_label)
+    return container
+
+
+def _readonly_line(value: str) -> QLineEdit:
+    line = QLineEdit(value)
+    line.setReadOnly(True)
+    line.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    return line
+
+
+def _fix_dialog_size(dialog: QDialog, min_width: int = 0, min_height: int = 0) -> None:
+    hint = dialog.sizeHint()
+    dialog.setFixedSize(max(hint.width(), min_width), max(hint.height(), min_height))

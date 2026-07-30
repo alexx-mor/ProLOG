@@ -80,14 +80,12 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("Файл")
-        self.organization_action = QAction("Авторизация / сменить пользователя", self)
-        self.users_action = QAction("Пользователи", self)
+        self.organization_action = QAction("Авторизация", self)
         self.import_action = QAction("Импорт сотрудников", self)
         self.import_legacy_reports_action = QAction("Импорт старых отчетов Excel", self)
         self.export_employees_action = QAction("Экспорт сотрудников", self)
         self.exit_action = QAction("Выход", self)
         file_menu.addAction(self.organization_action)
-        file_menu.addAction(self.users_action)
         file_menu.addSeparator()
         file_menu.addAction(self.import_action)
         file_menu.addAction(self.import_legacy_reports_action)
@@ -140,7 +138,6 @@ class MainWindow(QMainWindow):
 
     def _connect(self) -> None:
         self.organization_action.triggered.connect(self.switch_user)
-        self.users_action.triggered.connect(self.manage_users)
         self.import_action.triggered.connect(self.import_employees)
         self.import_legacy_reports_action.triggered.connect(self.import_legacy_reports)
         self.export_employees_action.triggered.connect(self.export_employees)
@@ -240,8 +237,6 @@ class MainWindow(QMainWindow):
         can_export_reports = role_can_access(self.auth_session.role, MODULE_REPORT_EXPORT)
         can_view_payroll = role_can_access(self.auth_session.role, MODULE_PAYROLL)
         can_check_updates = role_can_access(self.auth_session.role, MODULE_UPDATES)
-        can_manage_users = role_can_access(self.auth_session.role, MODULE_USERS)
-        self.users_action.setEnabled(can_manage_users)
         self.import_action.setEnabled(is_employee_admin)
         self.export_employees_action.setEnabled(is_employee_admin)
         self.directories_action.setEnabled(can_edit_directories)
@@ -264,7 +259,13 @@ class MainWindow(QMainWindow):
             self._ensure_initial_setup()
 
     def switch_user(self) -> None:
-        dialog = LoginDialog(self.auth_service, self, close_app_on_reject=False)
+        dialog = LoginDialog(
+            self.auth_service,
+            self,
+            close_app_on_reject=False,
+            current_session=self.auth_session,
+            allow_user_management=role_can_access(self.auth_session.role, MODULE_USERS),
+        )
         if dialog.exec():
             self.auth_session = dialog.session()
             self._sync_config_from_auth_profile()
@@ -287,7 +288,7 @@ class MainWindow(QMainWindow):
     def _ensure_initial_setup(self) -> None:
         if self.config.initial_setup_done:
             return
-        if not role_can_access(self.auth_session.role, MODULE_DIRECTORIES):
+        if not self.auth_session.is_admin:
             self._warn("Первичная настройка доступна только руководителю")
             self.close()
             QApplication.instance().quit()
@@ -368,7 +369,11 @@ class MainWindow(QMainWindow):
     def edit_directories(self) -> None:
         if not self._require_access(MODULE_DIRECTORIES):
             return
-        dialog = DirectoryDialog(self.directories, self)
+        dialog = DirectoryDialog(
+            self.directories,
+            self,
+            can_edit_pay_rates=role_can_access(self.auth_session.role, MODULE_PAYROLL),
+        )
         dialog.exec()
         self.refresh_directories()
         self.refresh_analytics()
@@ -378,7 +383,12 @@ class MainWindow(QMainWindow):
         if not self._require_access(MODULE_DIRECTORIES):
             return
         before_names = {item.name.casefold() for item in self.directories.list_all("objects")}
-        dialog = DirectoryDialog(self.directories, self, initial_key="objects")
+        dialog = DirectoryDialog(
+            self.directories,
+            self,
+            initial_key="objects",
+            can_edit_pay_rates=role_can_access(self.auth_session.role, MODULE_PAYROLL),
+        )
         dialog.exec()
         objects = self.directories.list_all("objects")
         self.refresh_directories()

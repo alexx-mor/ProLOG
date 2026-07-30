@@ -1,5 +1,29 @@
 ﻿# Changelog
 
+## 2026-07-30 - Authorization polish and directory icons
+
+### Added
+
+- Added formatting examples under registration fields for organization, department, department leader and optional user name.
+- Added current organization, department and leader display to the in-app authorization dialog.
+- Added user management access inside the in-app authorization dialog for leaders.
+- Added cropped directory icons from `icons_modules.png` under `resources/directory_icons`.
+
+### Changed
+
+- Fixed auth dialogs to prevent manual resizing.
+- Removed the separate `Файл - Пользователи` menu item; users are managed from `Файл - Авторизация`.
+- Allowed ordinary users to edit non-payroll directories while keeping the payment directory restricted to leaders.
+- Stabilized auth text-field borders on hover/focus and refined auth group-box title styling.
+- Replaced generated directory navigation icons with PNG resources.
+
+### Verified
+
+- Python syntax check passed for changed modules.
+- Qt smoke test passed for fixed auth dialogs, in-app authorization layout, user-management button, non-payroll directory access and hidden payment directory for ordinary users.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - Employee group directory
 
 ### Added

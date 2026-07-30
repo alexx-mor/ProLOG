@@ -36,6 +36,43 @@ QPushButton {
 QLineEdit, QComboBox, QDateEdit {
     min-height: 28px;
 }
+QLineEdit {
+    background: #ffffff;
+    border: 1px solid #98a4af;
+    padding: 2px 6px;
+}
+QLineEdit:hover {
+    border: 1px solid #6f7b86;
+}
+QLineEdit:focus {
+    border: 1px solid #2f80ed;
+}
+QLineEdit:disabled, QLineEdit:read-only {
+    background: #eef2f6;
+    color: #52606d;
+    border: 1px solid #cfd7df;
+}
+QGroupBox#AuthGroupBox {
+    border: 1px solid #d7dde3;
+    border-radius: 6px;
+    margin-top: 18px;
+    padding: 18px 14px 14px 14px;
+    background: #ffffff;
+}
+QGroupBox#AuthGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 14px;
+    top: 6px;
+    padding: 0 6px;
+    background: #f4f6f8;
+    color: #1f2328;
+    font-weight: 600;
+}
+QLabel#AuthHint {
+    color: #687483;
+    font-size: 9pt;
+}
 QTableWidget {
     background: #ffffff;
     border: 1px solid #d7dde3;

@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from constants import APP_LOGO_FILE, APP_NAME, APP_VERSION
+from constants import APP_LOGO_FILE, APP_NAME, APP_VERSION, DIRECTORY_ICONS_DIR
 from directory_files import dictionary_statuses, merge_dictionary_updates
 from category_rules import NO_CATEGORY, STUDENT_CATEGORY
 from models import DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
@@ -767,13 +767,22 @@ class DirectoryDialog(QDialog):
         "calendar": "Производственный календарь",
     }
 
-    def __init__(self, directory_service, parent=None, initial_key: str = "locations") -> None:
+    def __init__(
+        self,
+        directory_service,
+        parent=None,
+        initial_key: str = "locations",
+        can_edit_pay_rates: bool = True,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Справочники")
         self.resize(1320, 820)
         self.directory_service = directory_service
-        self.current_key = initial_key if initial_key in self.DIRECTORY_LABELS else "locations"
-        self._show_inactive_by_key = {key: True for key in self.DIRECTORY_LABELS}
+        self.directory_labels = dict(self.DIRECTORY_LABELS)
+        if not can_edit_pay_rates:
+            self.directory_labels.pop("pay_rates", None)
+        self.current_key = initial_key if initial_key in self.directory_labels else next(iter(self.directory_labels))
+        self._show_inactive_by_key = {key: True for key in self.directory_labels}
         self.navigation = QListWidget()
         self.navigation.setFixedWidth(285)
         self.navigation.setIconSize(QSize(22, 22))
@@ -1166,15 +1175,15 @@ class DirectoryDialog(QDialog):
         self.calendar_import_button.clicked.connect(self._import_calendar_year)
 
     def _fill_navigation(self) -> None:
-        for key, label in self.DIRECTORY_LABELS.items():
+        for key, label in self.directory_labels.items():
             item = QListWidgetItem(_directory_icon(key), label)
             item.setToolTip(label)
             self.navigation.addItem(item)
-        keys = list(self.DIRECTORY_LABELS)
+        keys = list(self.directory_labels)
         self.navigation.setCurrentRow(keys.index(self.current_key))
 
     def _navigation_changed(self, row: int) -> None:
-        keys = list(self.DIRECTORY_LABELS)
+        keys = list(self.directory_labels)
         if 0 <= row < len(keys):
             self.current_key = keys[row]
             self.search.blockSignals(True)
@@ -1655,6 +1664,9 @@ def _status_icon(color: str) -> QIcon:
 
 
 def _directory_icon(key: str) -> QIcon:
+    icon_file = DIRECTORY_ICONS_DIR / f"{key}.png"
+    if icon_file.exists():
+        return QIcon(str(icon_file))
     colors = {
         "locations": "#2f80ed",
         "work_types": "#7c5cc4",

@@ -19,6 +19,7 @@ RESOURCES_DIR = BUNDLE_DIR / "resources"
 BUNDLED_DICTIONARIES_DIR = BUNDLE_DIR / "dictionaries"
 APP_ICON_FILE = RESOURCES_DIR / "app.ico"
 APP_LOGO_FILE = RESOURCES_DIR / "app_logo.png"
+DIRECTORY_ICONS_DIR = RESOURCES_DIR / "directory_icons"
 
 CONFIG_FILE = BASE_DIR / "config.json"
 AUTH_FILE = DATA_DIR / "auth.json"
