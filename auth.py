@@ -8,6 +8,7 @@ import hmac
 import json
 import logging
 import secrets
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -231,8 +232,7 @@ def _validate_password(password: str, owner: str) -> None:
 
 def _hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256",
+    digest = _pbkdf2_sha256(
         password.encode("utf-8"),
         salt.encode("ascii"),
         PASSWORD_ITERATIONS,
@@ -246,8 +246,7 @@ def _verify_password(password: str, password_hash: str) -> bool:
         algorithm, iterations_text, salt, expected = password_hash.split("$", 3)
         if algorithm != PASSWORD_ALGORITHM:
             return False
-        digest = hashlib.pbkdf2_hmac(
-            "sha256",
+        digest = _pbkdf2_sha256(
             password.encode("utf-8"),
             salt.encode("ascii"),
             int(iterations_text),
@@ -256,6 +255,78 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
     actual = base64.b64encode(digest).decode("ascii")
     return hmac.compare_digest(actual, expected)
+
+
+def _pbkdf2_sha256(password: bytes, salt: bytes, iterations: int) -> bytes:
+    if iterations <= 0:
+        raise ValueError("Количество итераций PBKDF2 должно быть положительным")
+    native_pbkdf2 = getattr(hashlib, "pbkdf2_hmac", None)
+    if callable(native_pbkdf2):
+        return native_pbkdf2("sha256", password, salt, iterations)
+    if sys.platform == "win32":
+        try:
+            return _windows_pbkdf2_sha256(password, salt, iterations)
+        except OSError:
+            logger.exception("Windows PBKDF2 provider is unavailable; using Python fallback")
+
+    # Some embedded Windows Python builds do not expose OpenSSL PBKDF2.
+    current = hmac.new(password, salt + b"\x00\x00\x00\x01", hashlib.sha256).digest()
+    result = int.from_bytes(current, "big")
+    for _ in range(1, iterations):
+        current = hmac.new(password, current, hashlib.sha256).digest()
+        result ^= int.from_bytes(current, "big")
+    return result.to_bytes(hashlib.sha256().digest_size, "big")
+
+
+def _windows_pbkdf2_sha256(password: bytes, salt: bytes, iterations: int) -> bytes:
+    import ctypes
+
+    bcrypt = ctypes.WinDLL("bcrypt.dll")
+    algorithm = ctypes.c_void_p()
+    bcrypt.BCryptOpenAlgorithmProvider.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_wchar_p,
+        ctypes.c_wchar_p,
+        ctypes.c_ulong,
+    ]
+    bcrypt.BCryptOpenAlgorithmProvider.restype = ctypes.c_long
+    bcrypt.BCryptDeriveKeyPBKDF2.argtypes = [
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_ubyte),
+        ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_ubyte),
+        ctypes.c_ulong,
+        ctypes.c_ulonglong,
+        ctypes.POINTER(ctypes.c_ubyte),
+        ctypes.c_ulong,
+        ctypes.c_ulong,
+    ]
+    bcrypt.BCryptDeriveKeyPBKDF2.restype = ctypes.c_long
+    bcrypt.BCryptCloseAlgorithmProvider.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+    bcrypt.BCryptCloseAlgorithmProvider.restype = ctypes.c_long
+    status = bcrypt.BCryptOpenAlgorithmProvider(ctypes.byref(algorithm), "SHA256", None, 0x00000008)
+    if status != 0:
+        raise OSError(f"BCryptOpenAlgorithmProvider failed: 0x{status & 0xFFFFFFFF:08X}")
+    try:
+        password_buffer = (ctypes.c_ubyte * len(password)).from_buffer_copy(password)
+        salt_buffer = (ctypes.c_ubyte * len(salt)).from_buffer_copy(salt)
+        output = (ctypes.c_ubyte * hashlib.sha256().digest_size)()
+        status = bcrypt.BCryptDeriveKeyPBKDF2(
+            algorithm,
+            password_buffer,
+            len(password),
+            salt_buffer,
+            len(salt),
+            iterations,
+            output,
+            len(output),
+            0,
+        )
+        if status != 0:
+            raise OSError(f"BCryptDeriveKeyPBKDF2 failed: 0x{status & 0xFFFFFFFF:08X}")
+        return bytes(output)
+    finally:
+        bcrypt.BCryptCloseAlgorithmProvider(algorithm, 0)
 
 
 def _profile_from_dict(data: dict[str, Any]) -> AuthProfile:

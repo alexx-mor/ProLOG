@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 2026-07-30 - Packaged authentication compatibility
+
+### Fixed
+
+- Fixed initial registration crash in the portable build when embedded Python does not expose `hashlib.pbkdf2_hmac`.
+- Added Windows BCrypt PBKDF2-SHA256 fallback while preserving the existing password-hash format and iteration count.
+- Added a pure Python fallback for environments where neither OpenSSL PBKDF2 nor Windows BCrypt is available.
+
+### Verified
+
+- Fallback output matches Python's native PBKDF2-SHA256 output at `260,000` iterations.
+- Password creation, successful verification and wrong-password rejection passed in a dedicated PyInstaller executable.
+
 ## 2026-07-30 - Directory ordering and terminology
 
 ### Added
