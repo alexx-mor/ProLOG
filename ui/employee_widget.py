@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from models import Employee
+from models import DirectoryItem, Employee
 
 
 class EmployeeWidget(QWidget):
@@ -41,8 +41,6 @@ class EmployeeWidget(QWidget):
         self.search.setPlaceholderText("Найти сотрудника")
         self.group_filter = QComboBox()
         self.group_filter.addItem("Все группы", "")
-        self.group_filter.addItem("Рабочие", "Рабочие")
-        self.group_filter.addItem("ИТР", "ИТР")
         self.group_filter.setView(QListView())
         self.position_filter = QComboBox()
         self.position_filter.addItem("Все должности", "")
@@ -115,6 +113,17 @@ class EmployeeWidget(QWidget):
         index = self.position_filter.findData(current)
         self.position_filter.setCurrentIndex(index if index >= 0 else 0)
         self.position_filter.blockSignals(False)
+
+    def set_group_filter_options(self, groups: list[DirectoryItem]) -> None:
+        current = self.group_filter.currentData()
+        self.group_filter.blockSignals(True)
+        self.group_filter.clear()
+        self.group_filter.addItem("Все группы", "")
+        for group in groups:
+            self.group_filter.addItem(group.name, group.name)
+        index = self.group_filter.findData(current)
+        self.group_filter.setCurrentIndex(index if index >= 0 else 0)
+        self.group_filter.blockSignals(False)
 
     def set_management_enabled(self, enabled: bool) -> None:
         self._management_enabled = enabled

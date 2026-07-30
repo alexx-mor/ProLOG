@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QProgressDialog,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
@@ -245,12 +246,17 @@ class EmployeeDialog(QDialog):
 
 class PositionDialog(QDialog):
     CATEGORY_RULES = ("—", "1", "1-2", "1-3", "1-4", "1-5", "1-6")
-    GROUPS = ("Рабочие", "ИТР")
 
-    def __init__(self, position: DirectoryItem | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        position: DirectoryItem | None = None,
+        parent=None,
+        groups: list[DirectoryItem] | list[str] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Должность")
         self.setMinimumWidth(700)
+        group_names = self._group_names(groups, position.group if position else "")
         self.name = QLineEdit(position.name if position else "")
         self.category = QComboBox()
         self.category.addItems(self.CATEGORY_RULES)
@@ -260,7 +266,8 @@ class PositionDialog(QDialog):
         self.salary_type.addItem("Ставка", "hourly")
         self.salary_type.addItem("Зарплата", "monthly")
         self.group = QComboBox()
-        self.group.addItems(self.GROUPS)
+        self.group.addItems(group_names)
+        self.group.setEnabled(bool(group_names))
         self.is_active = position.is_active if position else True
         self.status_label = QLabel()
         self.toggle_active_button = QPushButton()
@@ -274,8 +281,9 @@ class PositionDialog(QDialog):
             self.student_allowed.setChecked(position.student_allowed)
             index = self.salary_type.findData(position.salary_type)
             self.salary_type.setCurrentIndex(index if index >= 0 else 0)
-            group = position.group or "Рабочие"
-            self.group.setCurrentText(group if group in self.GROUPS else "Рабочие")
+            group = position.group or (group_names[0] if group_names else "")
+            index = self.group.findText(group)
+            self.group.setCurrentIndex(index if index >= 0 else 0)
             self.is_active = position.is_active
             self._sync_active_controls()
 
@@ -304,9 +312,19 @@ class PositionDialog(QDialog):
             self.student_allowed.isChecked(),
             self.salary.text().strip(),
             str(self.salary_type.currentData() or "hourly"),
-            self.group.currentText().strip() or "Рабочие",
+            self.group.currentText().strip(),
             self.is_active,
         )
+
+    def _group_names(self, groups: list[DirectoryItem] | list[str] | None, current_group: str) -> list[str]:
+        names: list[str] = []
+        for group in groups or []:
+            name = getattr(group, "name", str(group)).strip()
+            if name and name.casefold() not in {existing.casefold() for existing in names}:
+                names.append(name)
+        if current_group.strip() and current_group.casefold() not in {name.casefold() for name in names}:
+            names.append(current_group.strip())
+        return names
 
     def accept(self) -> None:
         if not self.name.text().strip():
@@ -538,6 +556,8 @@ class ProductDialog(QDialog):
         self.is_active = product.is_active if product else True
         self.object = QComboBox()
         self.object.setView(QListView())
+        self.object.setMinimumWidth(360)
+        self.object.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.object.addItem("", None)
         for item in objects:
             self.object.addItem(item.name, item.id)
@@ -729,6 +749,7 @@ class DirectoryDialog(QDialog):
     DIRECTORY_LABELS = {
         "locations": "Местонахождения",
         "work_types": "Виды работ",
+        "employee_groups": "Блоки/Группы",
         "positions": "Должности",
         "pay_rates": "Оплата",
         "objects": "Объекты",
@@ -738,6 +759,7 @@ class DirectoryDialog(QDialog):
     DIRECTORY_TITLES = {
         "locations": "Справочник местонахождений",
         "work_types": "Справочник видов работ",
+        "employee_groups": "Справочник блоков/групп",
         "positions": "Справочник должностей",
         "pay_rates": "Справочник оплаты",
         "objects": "Справочник объектов",
@@ -751,6 +773,7 @@ class DirectoryDialog(QDialog):
         self.resize(1320, 820)
         self.directory_service = directory_service
         self.current_key = initial_key if initial_key in self.DIRECTORY_LABELS else "locations"
+        self._show_inactive_by_key = {key: True for key in self.DIRECTORY_LABELS}
         self.navigation = QListWidget()
         self.navigation.setFixedWidth(285)
         self.navigation.setIconSize(QSize(22, 22))
@@ -767,6 +790,8 @@ class DirectoryDialog(QDialog):
         self.product_filter_panel = QWidget()
         self.product_object_filter = QComboBox()
         self.product_object_filter.setView(QListView())
+        self.product_object_filter.setMinimumWidth(280)
+        self.product_object_filter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.calendar_panel = QWidget()
         self.calendar_year = QSpinBox()
         self.calendar_year.setRange(2000, 2100)
@@ -856,7 +881,7 @@ class DirectoryDialog(QDialog):
                 self.table.setItem(row, 1, category)
                 student = QTableWidgetItem("Да" if item.student_allowed else "Нет")
                 student.setToolTip(student.text())
-                group = QTableWidgetItem(item.group or "Рабочие")
+                group = QTableWidgetItem(item.group)
                 group.setToolTip(group.text())
                 self.table.setItem(row, 2, student)
                 self.table.setItem(row, 3, group)
@@ -1070,7 +1095,7 @@ class DirectoryDialog(QDialog):
         product_filter_layout = QHBoxLayout(self.product_filter_panel)
         product_filter_layout.setContentsMargins(0, 0, 0, 0)
         product_filter_layout.addWidget(QLabel("Объект"))
-        product_filter_layout.addWidget(self.product_object_filter)
+        product_filter_layout.addWidget(self.product_object_filter, 1)
         product_filter_layout.addStretch()
 
         calendar_top = QHBoxLayout()
@@ -1127,7 +1152,7 @@ class DirectoryDialog(QDialog):
     def _connect(self) -> None:
         self.navigation.currentRowChanged.connect(self._navigation_changed)
         self.search.textChanged.connect(self.refresh)
-        self.show_inactive.toggled.connect(self.refresh)
+        self.show_inactive.toggled.connect(self._show_inactive_changed)
         self.add_button.clicked.connect(self._add_item)
         self.rename_button.clicked.connect(self._rename_item)
         self.disable_button.clicked.connect(lambda: self._set_active(False))
@@ -1152,8 +1177,20 @@ class DirectoryDialog(QDialog):
         keys = list(self.DIRECTORY_LABELS)
         if 0 <= row < len(keys):
             self.current_key = keys[row]
+            self.search.blockSignals(True)
             self.search.clear()
+            self.search.blockSignals(False)
+            self._sync_show_inactive_checkbox()
             self.refresh()
+
+    def _sync_show_inactive_checkbox(self) -> None:
+        self.show_inactive.blockSignals(True)
+        self.show_inactive.setChecked(self._show_inactive_by_key.get(self.current_key, True))
+        self.show_inactive.blockSignals(False)
+
+    def _show_inactive_changed(self, checked: bool) -> None:
+        self._show_inactive_by_key[self.current_key] = checked
+        self.refresh()
 
     def _selected_id(self) -> int | None:
         row = self.table.currentRow()
@@ -1184,6 +1221,13 @@ class DirectoryDialog(QDialog):
             return self._row_items[row] if 0 <= row < len(self._row_items) else None
         return self._items[row] if 0 <= row < len(self._items) else None
 
+    def _position_groups(self, current_group: str = "") -> list[DirectoryItem | str]:
+        groups: list[DirectoryItem | str] = list(self.directory_service.list("employee_groups"))
+        normalized = current_group.strip().casefold()
+        if normalized and all(getattr(group, "name", str(group)).casefold() != normalized for group in groups):
+            groups.append(current_group.strip())
+        return groups
+
     def _add_item(self) -> None:
         if self.current_key == "pay_rates":
             self._info("Строки оплаты формируются автоматически из активных должностей и их категорий")
@@ -1201,7 +1245,7 @@ class DirectoryDialog(QDialog):
                 self._save_product(dialog.value())
             return
         if self.current_key == "positions":
-            dialog = PositionDialog(parent=self)
+            dialog = PositionDialog(parent=self, groups=self._position_groups())
             if dialog.exec():
                 name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 item_id = self.directory_service.ensure("positions", name)
@@ -1266,7 +1310,7 @@ class DirectoryDialog(QDialog):
             if item is None:
                 self._info("Выберите строку")
                 return
-            dialog = PositionDialog(item, self)
+            dialog = PositionDialog(item, self, groups=self._position_groups(item.group))
             if dialog.exec():
                 name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 self.directory_service.update_position_details(
@@ -1525,6 +1569,12 @@ class DirectoryDialog(QDialog):
             self.table.setColumnWidth(0, 110)
             self.table.setColumnWidth(1, 190)
             self.table.setColumnWidth(3, 210)
+        elif self.current_key == "employee_groups":
+            self.table.setColumnCount(2)
+            self.table.setHorizontalHeaderLabels(["Блок/Группа", "Статус"])
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(1, 130)
         else:
             self.table.setColumnCount(2)
             self.table.setHorizontalHeaderLabels(["Название", "Статус"])
@@ -1608,6 +1658,7 @@ def _directory_icon(key: str) -> QIcon:
     colors = {
         "locations": "#2f80ed",
         "work_types": "#7c5cc4",
+        "employee_groups": "#5966b3",
         "positions": "#2f6f73",
         "pay_rates": "#a46a12",
         "objects": "#3d6f9f",
@@ -1632,6 +1683,12 @@ def _directory_icon(key: str) -> QIcon:
         painter.drawLine(7, 16, 16, 7)
         painter.drawLine(14, 7, 18, 11)
         painter.drawLine(6, 15, 9, 18)
+    elif key == "employee_groups":
+        painter.drawEllipse(6, 6, 5, 5)
+        painter.drawEllipse(13, 6, 5, 5)
+        painter.drawLine(8, 12, 8, 17)
+        painter.drawLine(15, 12, 15, 17)
+        painter.drawLine(8, 14, 15, 14)
     elif key == "positions":
         painter.drawRect(6, 9, 12, 8)
         painter.drawLine(9, 9, 9, 7)

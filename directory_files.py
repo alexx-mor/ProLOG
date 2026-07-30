@@ -13,12 +13,13 @@ from constants import BUNDLED_DICTIONARIES_DIR, DICTIONARIES_DIR
 
 logger = logging.getLogger(__name__)
 
-DIRECTORY_FILE_NAMES = ("locations", "objects", "positions", "work_types")
+DIRECTORY_FILE_NAMES = ("locations", "objects", "positions", "work_types", "employee_groups")
 DIRECTORY_LABELS = {
     "locations": "Местонахождения",
     "objects": "Объекты",
     "positions": "Должности",
     "work_types": "Виды работ",
+    "employee_groups": "Блоки/Группы",
 }
 DEFAULT_POSITION_CATEGORY = "1-3"
 DEPARTMENT_ALIASES = {

@@ -168,12 +168,14 @@ class MainWindow(QMainWindow):
     def refresh_directories(self) -> None:
         active_objects = self.directories.list("objects")
         active_positions = self.directories.list("positions")
+        active_groups = self.directories.list("employee_groups")
         self.worklog_widget.set_directories(
             self.directories.list("locations"),
             active_objects,
             self.directories.list("work_types"),
             self.directories.list_products(active_only=False),
         )
+        self.employee_widget.set_group_filter_options(active_groups)
         self.employee_widget.set_position_filter_options(active_positions)
         self.report_viewer.set_objects(self.directories.list_all("objects"))
         self.analytics_widget.set_objects(self.directories.list_all("objects"))

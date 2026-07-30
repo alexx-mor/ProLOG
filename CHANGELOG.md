@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 2026-07-30 - Employee group directory
+
+### Added
+
+- Added the `Блоки/Группы` directory with starter editable groups from `dictionaries/employee_groups.json`.
+- Added group-driven position editing and employee group filters, replacing fixed UI choices for `Рабочие` and `ИТР`.
+
+### Changed
+
+- Made `Показывать неактивные` remember its state per directory section instead of applying globally to all directories.
+- Widened object dropdowns in product filtering and product editing so placeholder and object names fit better.
+- Group rename now updates assigned positions; group deletion is blocked while positions still use it.
+
+### Verified
+
+- Python syntax check passed for changed modules.
+- Qt smoke test passed for the new directory, per-section inactive filter, product object dropdown width and group-driven position dialog.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - Directory navigation polish
 
 ### Added

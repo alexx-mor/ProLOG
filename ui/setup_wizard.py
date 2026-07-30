@@ -247,7 +247,7 @@ class _DirectorySetupPage(QWidget):
                 category.setToolTip(item.category)
                 student = QTableWidgetItem("Да" if item.student_allowed else "Нет")
                 student.setToolTip(student.text())
-                group = QTableWidgetItem(item.group or "Рабочие")
+                group = QTableWidgetItem(item.group)
                 group.setToolTip(group.text())
                 self.table.setItem(row, 1, category)
                 self.table.setItem(row, 2, student)
@@ -261,9 +261,16 @@ class _DirectorySetupPage(QWidget):
         row = self.table.currentRow()
         return self.items[row] if 0 <= row < len(self.items) else None
 
+    def _position_groups(self, current_group: str = ""):
+        groups = list(self.directories.list("employee_groups"))
+        normalized = current_group.strip().casefold()
+        if normalized and all(getattr(group, "name", str(group)).casefold() != normalized for group in groups):
+            groups.append(current_group.strip())
+        return groups
+
     def _add(self) -> None:
         if self.key == "positions":
-            dialog = PositionDialog(parent=self)
+            dialog = PositionDialog(parent=self, groups=self._position_groups())
             if dialog.exec():
                 name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 item_id = self.directories.ensure(self.key, name)
@@ -291,7 +298,7 @@ class _DirectorySetupPage(QWidget):
         if not item:
             return
         if self.key == "positions":
-            dialog = PositionDialog(item, self)
+            dialog = PositionDialog(item, self, groups=self._position_groups(item.group))
             if dialog.exec():
                 name, category, student_allowed, salary, salary_type, group, is_active = dialog.values()
                 self.directories.update_position_details(item.id, name, category, student_allowed, salary, salary_type, group)

@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 DIRECTORY_TABLES = {
     "objects": "Objects",
+    "employee_groups": "EmployeeGroups",
     "positions": "Positions",
     "work_types": "WorkTypes",
     "locations": "Locations",
@@ -114,6 +115,7 @@ class Database:
     def _seed(self, connection: sqlite3.Connection) -> None:
         seed_values = {
             "Locations": load_names("locations"),
+            "EmployeeGroups": load_names("employee_groups"),
             "Objects": load_names("objects"),
             "WorkTypes": load_names("work_types"),
         }
@@ -249,7 +251,16 @@ class DirectoryRepository:
         if not normalized:
             raise ValueError("Название справочника не может быть пустым")
         with self.database.connect() as connection:
+            old_name = ""
+            if table_key == "employee_groups":
+                row = connection.execute(f"SELECT name FROM {table} WHERE id = ?", (item_id,)).fetchone()
+                old_name = str(row["name"] or "") if row else ""
             connection.execute(f"UPDATE {table} SET name = ? WHERE id = ?", (normalized, item_id))
+            if table_key == "employee_groups" and old_name:
+                connection.execute(
+                    "UPDATE Positions SET employee_group = ? WHERE employee_group = ?",
+                    (normalized, old_name),
+                )
 
     def upsert(self, table_key: str, name: str) -> int:
         table = self._table(table_key)
@@ -264,7 +275,10 @@ class DirectoryRepository:
                 student_allowed = int(seed.student_allowed) if seed else int(_default_student_allowed(normalized))
                 salary = seed.salary if seed else ""
                 salary_type = seed.salary_type if seed else "hourly"
-                group = seed.group if seed else _default_position_group(normalized)
+                group = self._resolve_employee_group(
+                    connection,
+                    seed.group if seed else _default_position_group(normalized),
+                )
                 if seed:
                     connection.execute(
                         """
@@ -331,11 +345,25 @@ class DirectoryRepository:
                     int(student_allowed),
                     salary.strip(),
                     _normalize_salary_type(salary_type),
-                    group.strip() or "Рабочие",
+                    self._resolve_employee_group(connection, group.strip() or _default_position_group(normalized)),
                     item_id,
                 ),
             )
             self.database._sync_pay_rates(connection)
+
+    def _resolve_employee_group(self, connection: sqlite3.Connection, preferred: str) -> str:
+        preferred = preferred.strip()
+        rows = connection.execute("SELECT name, is_active FROM EmployeeGroups ORDER BY name").fetchall()
+        if not rows:
+            return preferred or _default_position_group("")
+        for row in rows:
+            name = str(row["name"] or "")
+            if preferred and name.casefold() == preferred.casefold():
+                return name
+        for row in rows:
+            if bool(row["is_active"]):
+                return str(row["name"] or "")
+        return str(rows[0]["name"] or preferred)
 
     def update_object_details(
         self,
@@ -641,7 +669,18 @@ class DirectoryRepository:
         table = self._table(table_key)
         try:
             with self.database.connect() as connection:
+                if table_key == "employee_groups":
+                    row = connection.execute(f"SELECT name FROM {table} WHERE id = ?", (item_id,)).fetchone()
+                    group_name = str(row["name"] or "") if row else ""
+                    used = connection.execute(
+                        "SELECT COUNT(*) AS count FROM Positions WHERE employee_group = ?",
+                        (group_name,),
+                    ).fetchone()
+                    if int(used["count"] or 0):
+                        raise ValueError("Нельзя удалить группу: она используется в справочнике должностей")
                 connection.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
+        except ValueError:
+            raise
         except sqlite3.IntegrityError as exc:
             raise ValueError("Нельзя удалить элемент: он уже используется в журнале работ") from exc
 
@@ -969,6 +1008,12 @@ CREATE TABLE IF NOT EXISTS Positions (
     salary TEXT NOT NULL DEFAULT '',
     salary_type TEXT NOT NULL DEFAULT 'hourly',
     employee_group TEXT NOT NULL DEFAULT 'Рабочие',
+    is_active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS EmployeeGroups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
