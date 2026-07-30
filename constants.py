@@ -21,6 +21,7 @@ APP_ICON_FILE = RESOURCES_DIR / "app.ico"
 APP_LOGO_FILE = RESOURCES_DIR / "app_logo.png"
 
 CONFIG_FILE = BASE_DIR / "config.json"
+AUTH_FILE = DATA_DIR / "auth.json"
 DATABASE_FILE = DATA_DIR / "prolog.sqlite3"
 
 DATE_FORMAT = "%Y-%m-%d"

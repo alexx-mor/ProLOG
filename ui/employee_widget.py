@@ -34,6 +34,7 @@ class EmployeeWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._employees: list[Employee] = []
+        self._management_enabled = True
         self.title = QLabel("Сотрудники")
         self.title.setObjectName("SectionTitle")
         self.search = QLineEdit()
@@ -115,6 +116,11 @@ class EmployeeWidget(QWidget):
         self.position_filter.setCurrentIndex(index if index >= 0 else 0)
         self.position_filter.blockSignals(False)
 
+    def set_management_enabled(self, enabled: bool) -> None:
+        self._management_enabled = enabled
+        for button in (self.add_button, self.edit_button, self.delete_button, self.import_button, self.export_button):
+            button.setVisible(enabled)
+
     def current_position_filter(self) -> str:
         return str(self.position_filter.currentData() or "")
 
@@ -155,16 +161,22 @@ class EmployeeWidget(QWidget):
             self.selected.emit(employee)
 
     def _emit_edit(self) -> None:
+        if not self._management_enabled:
+            return
         employee = self.current_employee()
         if employee:
             self.edit_requested.emit(employee)
 
     def _emit_delete(self) -> None:
+        if not self._management_enabled:
+            return
         employee = self.current_employee()
         if employee:
             self.delete_requested.emit(employee)
 
     def _show_context_menu(self, position) -> None:
+        if not self._management_enabled:
+            return
         menu = QMenu(self)
         add_action = QAction("Добавить сотрудника", self)
         edit_action = QAction("Редактировать", self)

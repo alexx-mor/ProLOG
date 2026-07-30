@@ -7,8 +7,11 @@ import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from auth import AuthService, AuthSession
+from config import ConfigManager
 from database import Database
 from ui.style import APP_STYLESHEET
+from ui.auth_dialogs import LoginDialog, RegistrationDialog
 from ui.main_window import MainWindow
 from utils import ensure_app_directories, setup_logging
 
@@ -41,9 +44,44 @@ def main() -> int:
     database.initialize()
     app = QApplication(sys.argv)
     app.setStyleSheet(APP_STYLESHEET)
-    window = MainWindow(database)
+    auth_service = AuthService()
+    session = _authorize(auth_service)
+    if session is None:
+        return 0
+    _sync_config_from_auth(auth_service)
+    window = MainWindow(database, auth_service, session)
     window.show()
     return app.exec()
+
+
+def _authorize(auth_service: AuthService) -> AuthSession | None:
+    try:
+        if auth_service.has_profile():
+            dialog = LoginDialog(auth_service)
+            if not dialog.exec():
+                return None
+            return dialog.session()
+        dialog = RegistrationDialog()
+        while True:
+            if not dialog.exec():
+                return None
+            try:
+                return auth_service.register_initial(dialog.registration_data())
+            except ValueError as exc:
+                QMessageBox.warning(dialog, "Регистрация", str(exc))
+    except ValueError as exc:
+        QMessageBox.critical(None, "Авторизация", str(exc))
+        return None
+
+
+def _sync_config_from_auth(auth_service: AuthService) -> None:
+    config_manager = ConfigManager()
+    settings = config_manager.load()
+    profile = auth_service.load_profile()
+    settings.organization_name = profile.organization_name
+    settings.department_name = profile.department_name
+    settings.leader_full_name = profile.leader_full_name
+    config_manager.save(settings)
 
 
 if __name__ == "__main__":

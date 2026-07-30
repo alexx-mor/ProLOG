@@ -9,9 +9,6 @@ datas = [
     ("templates", "templates"),
     ("dictionaries", "dictionaries"),
 ]
-private_requisites = root / "private" / "requisites.json"
-if private_requisites.exists():
-    datas.append((str(private_requisites), "private"))
 
 a = Analysis(
     ["main.py"],

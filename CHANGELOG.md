@@ -1,5 +1,28 @@
 ﻿# Changelog
 
+## 2026-07-30 - Password authorization and role access
+
+### Added
+
+- Added local password-based registration and login with two roles: `Руководитель` and `Пользователь`.
+- Added PBKDF2 password hashing with per-password salt; passwords are not stored as plain text.
+- Added a module access layer as groundwork for future connectable modules such as payroll.
+- Added role-based UI restrictions: ordinary users can fill, view and export reports, but cannot open payroll analytics, directories or employee administration.
+
+### Changed
+
+- Replaced fixed private requisites selection with first-run free registration fields.
+- Removed the private requisites file from the PyInstaller bundle.
+- Ignored local JSON data files under `data/`, including the new `data/auth.json`.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- Authentication smoke test passed for leader/user registration, login and password rejection.
+- Qt dialog constructor smoke test passed for registration and login dialogs.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - Product tracking in reports and analytics
 
 ### Added

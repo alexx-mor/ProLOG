@@ -39,8 +39,7 @@ from PySide6.QtWidgets import (
 from constants import APP_LOGO_FILE, APP_NAME, APP_VERSION
 from directory_files import dictionary_statuses, merge_dictionary_updates
 from category_rules import NO_CATEGORY, STUDENT_CATEGORY
-from models import AppSettings, DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
-from requisites import RequisitesOptions
+from models import DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
 from services import category_values_from_rule
 from update_checker import UpdateChecker
 
@@ -241,80 +240,6 @@ class EmployeeDialog(QDialog):
             self.category.addItem("")
             self.category.setEnabled(False)
         self.category.blockSignals(False)
-
-
-class OrganizationDialog(QDialog):
-    def __init__(self, settings: AppSettings, options: RequisitesOptions, required: bool = False, parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Авторизация")
-        self.setMinimumWidth(520)
-        self.required = required
-        self.organization = QComboBox()
-        self.department = QComboBox()
-        self.leader = QComboBox()
-        self._fill_combo(self.organization, options.organizations, settings.organization_name)
-        self._fill_combo(self.department, options.departments, settings.department_name)
-        self._fill_combo(self.leader, options.leaders, settings.leader_full_name)
-        save_button = QPushButton("Сохранить")
-        cancel_button = QPushButton("Отмена")
-        save_button.clicked.connect(self.accept)
-        cancel_button.clicked.connect(self.reject)
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        buttons.addWidget(save_button)
-        buttons.addWidget(cancel_button)
-        layout = QFormLayout(self)
-        layout.addRow("Организация", self.organization)
-        layout.addRow("Отдел", self.department)
-        layout.addRow("Руководитель", self.leader)
-        layout.addRow(buttons)
-
-    def accept(self) -> None:
-        if not self.is_complete():
-            self._info("Выберите организацию, отдел и руководителя")
-            return
-        super().accept()
-
-    def reject(self) -> None:
-        if self.required:
-            self._info("Для работы с программой необходимо пройти авторизацию")
-            return
-        super().reject()
-
-    def closeEvent(self, event) -> None:
-        if self.required and not self.is_complete():
-            self._info("Для работы с программой необходимо пройти авторизацию")
-            event.ignore()
-            return
-        super().closeEvent(event)
-
-    def is_complete(self) -> bool:
-        return bool(
-            self.organization.currentText().strip()
-            and self.department.currentText().strip()
-            and self.leader.currentText().strip()
-        )
-
-    def apply_to(self, settings: AppSettings) -> AppSettings:
-        settings.organization_name = self.organization.currentText().strip()
-        settings.department_name = self.department.currentText().strip()
-        settings.leader_full_name = self.leader.currentText().strip()
-        return settings
-
-    def _fill_combo(self, combo: QComboBox, values: list[str], current: str) -> None:
-        combo.addItem("")
-        combo.addItems(values)
-        index = combo.findText(current)
-        if index >= 0:
-            combo.setCurrentIndex(index)
-
-    def _info(self, message: str) -> None:
-        box = QMessageBox(self)
-        box.setWindowTitle("Авторизация")
-        box.setText(message)
-        box.setIcon(QMessageBox.Icon.Information)
-        box.addButton("ОК", QMessageBox.ButtonRole.AcceptRole)
-        box.exec()
 
 
 class PositionDialog(QDialog):
@@ -1996,7 +1921,7 @@ HELP_HTML = f"""
 <p><b>Назначение:</b> ежедневный сбор и унификация записей о выполненных работах.</p>
 <h3>Основной порядок работы</h3>
 <ol>
-  <li>Пройдите авторизацию через меню <b>Файл - Авторизация</b>.</li>
+  <li>При первом запуске зарегистрируйте организацию, руководителя и пользователя. Далее вход выполняется по паролю.</li>
   <li>При первом запуске пройдите первичную настройку: сотрудники, должности, виды работ и объекты.</li>
   <li>Выберите сотрудника слева и дату в рабочей области.</li>
   <li>Заполните объект, вид работ, описание, часы и комментарий.</li>

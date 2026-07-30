@@ -10,15 +10,24 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox, QSplitter, QTabWidget
 
 import excel_export
+from app_modules import (
+    MODULE_DIRECTORIES,
+    MODULE_EMPLOYEE_ADMIN,
+    MODULE_LEGACY_IMPORT,
+    MODULE_PAYROLL,
+    MODULE_REPORT_EXPORT,
+    MODULE_UPDATES,
+    role_can_access,
+)
+from auth import AuthService, AuthSession, role_label
 from config import ConfigManager
 from constants import APP_ICON_FILE, APP_NAME
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
-from directory_files import normalize_department_name
 from legacy_import.service import LegacyExcelImportService
-from requisites import load_requisites_options
 from services import AnalyticsService, DirectoryService, EmployeeService, WorkLogService
 from update_checker import UpdateChecker
-from ui.dialogs import AboutDialog, DirectoryDialog, EmployeeDialog, HelpDialog, OrganizationDialog, UpdateStatusDialog
+from ui.auth_dialogs import LoginDialog
+from ui.dialogs import AboutDialog, DirectoryDialog, EmployeeDialog, HelpDialog, UpdateStatusDialog
 from ui.analytics_widget import AnalyticsWidget
 from ui.employee_widget import EmployeeWidget
 from ui.legacy_import_dialog import LegacyImportDialog
@@ -31,12 +40,14 @@ logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, auth_service: AuthService, auth_session: AuthSession) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
         if APP_ICON_FILE.exists():
             self.setWindowIcon(QIcon(str(APP_ICON_FILE)))
         self.database = database
+        self.auth_service = auth_service
+        self.auth_session = auth_session
         self.directories = DirectoryService(DirectoryRepository(database))
         self.employees = EmployeeService(EmployeeRepository(database), self.directories)
         self.worklogs = WorkLogService(WorkLogRepository(database), self.directories)
@@ -44,8 +55,7 @@ class MainWindow(QMainWindow):
         self.legacy_importer = LegacyExcelImportService(database, self.employees, self.directories, self.worklogs)
         self.config_manager = ConfigManager()
         self.config = self.config_manager.load()
-        self.requisites_options = load_requisites_options()
-        self._startup_requisites_checked = False
+        self._startup_checked = False
         self.resize(self.config.window_width, self.config.window_height)
         self.employee_widget = EmployeeWidget()
         self.worklog_widget = WorkLogWidget()
@@ -55,6 +65,8 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._connect()
         self._apply_style()
+        self._sync_config_from_auth_profile()
+        self._apply_access_policy()
         self.statusBar().showMessage("Готово")
         self.refresh_directories()
         self.refresh_employees()
@@ -67,7 +79,7 @@ class MainWindow(QMainWindow):
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("Файл")
-        self.organization_action = QAction("Авторизация", self)
+        self.organization_action = QAction("Авторизация / сменить пользователя", self)
         self.import_action = QAction("Импорт сотрудников", self)
         self.import_legacy_reports_action = QAction("Импорт старых отчетов Excel", self)
         self.export_employees_action = QAction("Экспорт сотрудников", self)
@@ -124,7 +136,7 @@ class MainWindow(QMainWindow):
         return [left, right]
 
     def _connect(self) -> None:
-        self.organization_action.triggered.connect(self.edit_organization)
+        self.organization_action.triggered.connect(self.switch_user)
         self.import_action.triggered.connect(self.import_employees)
         self.import_legacy_reports_action.triggered.connect(self.import_legacy_reports)
         self.export_employees_action.triggered.connect(self.export_employees)
@@ -196,6 +208,8 @@ class MainWindow(QMainWindow):
         self.report_viewer.set_entries(entries)
 
     def refresh_analytics(self) -> None:
+        if not role_can_access(self.auth_session.role, MODULE_PAYROLL):
+            return
         result = self.analytics.build(
             employee_id=self.analytics_widget.employee_id(),
             date_from=self.analytics_widget.date_from_value(),
@@ -206,41 +220,63 @@ class MainWindow(QMainWindow):
         )
         self.analytics_widget.set_result(result)
 
+    def _sync_config_from_auth_profile(self) -> None:
+        profile = self.auth_service.load_profile()
+        self.config.organization_name = profile.organization_name
+        self.config.department_name = profile.department_name
+        self.config.leader_full_name = profile.leader_full_name
+        self.config_manager.save(self.config)
+
+    def _apply_access_policy(self) -> None:
+        is_employee_admin = role_can_access(self.auth_session.role, MODULE_EMPLOYEE_ADMIN)
+        can_edit_directories = role_can_access(self.auth_session.role, MODULE_DIRECTORIES)
+        can_import_legacy = role_can_access(self.auth_session.role, MODULE_LEGACY_IMPORT)
+        can_export_reports = role_can_access(self.auth_session.role, MODULE_REPORT_EXPORT)
+        can_view_payroll = role_can_access(self.auth_session.role, MODULE_PAYROLL)
+        can_check_updates = role_can_access(self.auth_session.role, MODULE_UPDATES)
+        self.import_action.setEnabled(is_employee_admin)
+        self.export_employees_action.setEnabled(is_employee_admin)
+        self.directories_action.setEnabled(can_edit_directories)
+        self.update_action.setEnabled(can_check_updates)
+        self.import_legacy_reports_action.setEnabled(can_import_legacy)
+        self.export_report_action.setEnabled(can_export_reports)
+        self.export_assignment_action.setEnabled(can_export_reports)
+        self.employee_widget.set_management_enabled(is_employee_admin)
+        analytics_index = self.tabs.indexOf(self.analytics_widget)
+        if analytics_index >= 0:
+            self.tabs.setTabVisible(analytics_index, can_view_payroll)
+            if not can_view_payroll and self.tabs.currentWidget() is self.analytics_widget:
+                self.tabs.setCurrentIndex(0)
+        self.setWindowTitle(f"{APP_NAME} - {self.auth_session.username}")
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if not self._startup_requisites_checked:
-            self._startup_requisites_checked = True
-            self._ensure_requisites()
+        if not self._startup_checked:
+            self._startup_checked = True
             self._ensure_initial_setup()
 
-    def edit_organization(self) -> None:
-        dialog = OrganizationDialog(self.config, self.requisites_options, parent=self)
+    def switch_user(self) -> None:
+        dialog = LoginDialog(self.auth_service, self)
         if dialog.exec():
-            self.config = dialog.apply_to(self.config)
-            self.directories.apply_department_defaults(self.config.department_name)
+            self.auth_session = dialog.session()
+            self._sync_config_from_auth_profile()
+            self._apply_access_policy()
             self.refresh_directories()
-            self._run(lambda: self.config_manager.save(self.config), "Авторизация сохранена")
-
-    def _ensure_requisites(self) -> None:
-        if self._has_requisites():
-            return
-        dialog = OrganizationDialog(self.config, self.requisites_options, required=True, parent=self)
-        if dialog.exec():
-            self.config = dialog.apply_to(self.config)
-            self.directories.apply_department_defaults(self.config.department_name)
-            self.refresh_directories()
-            self._run(lambda: self.config_manager.save(self.config), "Авторизация сохранена")
-
-    def _has_requisites(self) -> bool:
-        return (
-            self.config.organization_name in self.requisites_options.organizations
-            and normalize_department_name(self.config.department_name)
-            in {normalize_department_name(department) for department in self.requisites_options.departments}
-            and self.config.leader_full_name in self.requisites_options.leaders
-        )
+            self.refresh_employees()
+            self.refresh_report_viewer()
+            self.refresh_analytics()
+            self.statusBar().showMessage(
+                f"Выполнен вход: {self.auth_session.username} ({role_label(self.auth_session.role)})",
+                7000,
+            )
 
     def _ensure_initial_setup(self) -> None:
-        if self.config.initial_setup_done or not self._has_requisites():
+        if self.config.initial_setup_done:
+            return
+        if not role_can_access(self.auth_session.role, MODULE_DIRECTORIES):
+            self._warn("Первичная настройка доступна только руководителю")
+            self.close()
+            QApplication.instance().quit()
             return
         self.directories.apply_department_defaults(self.config.department_name)
         self.refresh_directories()
@@ -259,6 +295,8 @@ class MainWindow(QMainWindow):
             QApplication.instance().quit()
 
     def add_employee(self) -> None:
+        if not self._require_access(MODULE_EMPLOYEE_ADMIN):
+            return
         dialog = EmployeeDialog(self.directories.list("positions"), parent=self)
         if dialog.exec():
             self._run(lambda: self.employees.save(dialog.employee()), "Сотрудник сохранен")
@@ -266,6 +304,8 @@ class MainWindow(QMainWindow):
             self.refresh_employees()
 
     def edit_employee(self, employee) -> None:
+        if not self._require_access(MODULE_EMPLOYEE_ADMIN):
+            return
         dialog = EmployeeDialog(self.directories.list("positions"), employee, self)
         if dialog.exec():
             self._run(lambda: self.employees.save(dialog.employee(employee.id)), "Сотрудник обновлен")
@@ -273,11 +313,15 @@ class MainWindow(QMainWindow):
             self.refresh_employees()
 
     def delete_employee(self, employee) -> None:
+        if not self._require_access(MODULE_EMPLOYEE_ADMIN):
+            return
         if self._ask("Удалить", f"Удалить сотрудника '{employee.full_name}'?"):
             self._run(lambda: self.employees.delete(employee.id), "Сотрудник удален")
             self.refresh_employees()
 
     def import_employees(self) -> None:
+        if not self._require_access(MODULE_EMPLOYEE_ADMIN):
+            return
         file_name, _ = QFileDialog.getOpenFileName(self, "Импорт сотрудников", "", "Excel (*.xlsx)")
         if not file_name:
             return
@@ -287,6 +331,8 @@ class MainWindow(QMainWindow):
             self.refresh_employees()
 
     def import_legacy_reports(self) -> None:
+        if not self._require_access(MODULE_LEGACY_IMPORT):
+            return
         if not self.config.initial_setup_done:
             self._warn("Импорт старых отчетов доступен после завершения мастера настройки ProLOG")
             return
@@ -298,12 +344,16 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Старые отчеты Excel импортированы", 7000)
 
     def export_employees(self) -> None:
+        if not self._require_access(MODULE_EMPLOYEE_ADMIN):
+            return
         path = excel_export.default_employee_export_path()
         result = self._run(lambda: excel_export.export_employees(path, self.employees.list()), "Сотрудники экспортированы")
         if result:
             self.statusBar().showMessage(f"Файл сохранен: {result}", 10000)
 
     def edit_directories(self) -> None:
+        if not self._require_access(MODULE_DIRECTORIES):
+            return
         dialog = DirectoryDialog(self.directories, self)
         dialog.exec()
         self.refresh_directories()
@@ -311,6 +361,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Справочники обновлены", 5000)
 
     def open_objects_directory(self) -> None:
+        if not self._require_access(MODULE_DIRECTORIES):
+            return
         before_names = {item.name.casefold() for item in self.directories.list_all("objects")}
         dialog = DirectoryDialog(self.directories, self, initial_key="objects")
         dialog.exec()
@@ -347,6 +399,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Запись открыта для редактирования", 5000)
 
     def export_report(self) -> None:
+        if not self._require_access(MODULE_REPORT_EXPORT):
+            return
         work_date = self.worklog_widget.selected_date()
         entries = self.worklogs.report_entries(work_date=work_date)
         result = self._run(lambda: excel_export.export_work_report(entries, work_date, self.config), "Отчет экспортирован")
@@ -354,6 +408,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Отчет сохранен: {result}", 10000)
 
     def export_assignment(self) -> None:
+        if not self._require_access(MODULE_REPORT_EXPORT):
+            return
         work_date = self.worklog_widget.selected_date()
         entries = self.worklogs.report_entries(work_date=work_date)
         result = self._run(lambda: excel_export.export_shift_assignment(entries, work_date, self.config), "Сменное задание экспортировано")
@@ -361,6 +417,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Сменное задание сохранено: {result}", 10000)
 
     def check_updates(self, silent: bool = False) -> None:
+        if not role_can_access(self.auth_session.role, MODULE_UPDATES):
+            if not silent:
+                self._warn("Недостаточно прав для проверки обновлений")
+            return
         if not silent:
             dialog = UpdateStatusDialog(self)
             dialog.exec()
@@ -410,6 +470,12 @@ class MainWindow(QMainWindow):
             logger.exception("Operation failed")
             self._warn(str(exc))
             return None
+
+    def _require_access(self, module: str) -> bool:
+        if role_can_access(self.auth_session.role, module):
+            return True
+        self._warn("Недостаточно прав для выполнения операции")
+        return False
 
     def _warn(self, message: str) -> None:
         self.statusBar().showMessage(f"Ошибка: {message}", 10000)
