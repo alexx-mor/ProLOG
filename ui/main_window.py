@@ -17,6 +17,7 @@ from app_modules import (
     MODULE_PAYROLL,
     MODULE_REPORT_EXPORT,
     MODULE_UPDATES,
+    MODULE_USERS,
     role_can_access,
 )
 from auth import AuthService, AuthSession, role_label
@@ -26,7 +27,7 @@ from database import Database, DirectoryRepository, EmployeeRepository, WorkLogR
 from legacy_import.service import LegacyExcelImportService
 from services import AnalyticsService, DirectoryService, EmployeeService, WorkLogService
 from update_checker import UpdateChecker
-from ui.auth_dialogs import LoginDialog
+from ui.auth_dialogs import LoginDialog, UserManagementDialog
 from ui.dialogs import AboutDialog, DirectoryDialog, EmployeeDialog, HelpDialog, UpdateStatusDialog
 from ui.analytics_widget import AnalyticsWidget
 from ui.employee_widget import EmployeeWidget
@@ -80,11 +81,13 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("Файл")
         self.organization_action = QAction("Авторизация / сменить пользователя", self)
+        self.users_action = QAction("Пользователи", self)
         self.import_action = QAction("Импорт сотрудников", self)
         self.import_legacy_reports_action = QAction("Импорт старых отчетов Excel", self)
         self.export_employees_action = QAction("Экспорт сотрудников", self)
         self.exit_action = QAction("Выход", self)
         file_menu.addAction(self.organization_action)
+        file_menu.addAction(self.users_action)
         file_menu.addSeparator()
         file_menu.addAction(self.import_action)
         file_menu.addAction(self.import_legacy_reports_action)
@@ -137,6 +140,7 @@ class MainWindow(QMainWindow):
 
     def _connect(self) -> None:
         self.organization_action.triggered.connect(self.switch_user)
+        self.users_action.triggered.connect(self.manage_users)
         self.import_action.triggered.connect(self.import_employees)
         self.import_legacy_reports_action.triggered.connect(self.import_legacy_reports)
         self.export_employees_action.triggered.connect(self.export_employees)
@@ -234,6 +238,8 @@ class MainWindow(QMainWindow):
         can_export_reports = role_can_access(self.auth_session.role, MODULE_REPORT_EXPORT)
         can_view_payroll = role_can_access(self.auth_session.role, MODULE_PAYROLL)
         can_check_updates = role_can_access(self.auth_session.role, MODULE_UPDATES)
+        can_manage_users = role_can_access(self.auth_session.role, MODULE_USERS)
+        self.users_action.setEnabled(can_manage_users)
         self.import_action.setEnabled(is_employee_admin)
         self.export_employees_action.setEnabled(is_employee_admin)
         self.directories_action.setEnabled(can_edit_directories)
@@ -256,7 +262,7 @@ class MainWindow(QMainWindow):
             self._ensure_initial_setup()
 
     def switch_user(self) -> None:
-        dialog = LoginDialog(self.auth_service, self)
+        dialog = LoginDialog(self.auth_service, self, close_app_on_reject=False)
         if dialog.exec():
             self.auth_session = dialog.session()
             self._sync_config_from_auth_profile()
@@ -269,6 +275,12 @@ class MainWindow(QMainWindow):
                 f"Выполнен вход: {self.auth_session.username} ({role_label(self.auth_session.role)})",
                 7000,
             )
+
+    def manage_users(self) -> None:
+        if not self._require_access(MODULE_USERS):
+            return
+        dialog = UserManagementDialog(self.auth_service, self.auth_session.username, self)
+        dialog.exec()
 
     def _ensure_initial_setup(self) -> None:
         if self.config.initial_setup_done:

@@ -1,5 +1,26 @@
 ﻿# Changelog
 
+## 2026-07-30 - User management and login exit fix
+
+### Added
+
+- Added administrator-only user management from the `Файл - Пользователи` menu.
+- Added user creation, role editing, password reset and deletion for local accounts.
+- Added protection against deleting the last `Руководитель` account.
+
+### Changed
+
+- The login dialog now shows `Отмена` when it is opened for switching users from the running application.
+- The startup login and first registration dialogs explicitly quit the application when `Выход` is pressed.
+
+### Verified
+
+- Python syntax check passed for the changed modules.
+- Authentication smoke test passed for creating, editing, deleting users and protecting the last administrator.
+- Qt dialog constructor smoke test passed for login and user management dialogs.
+- Rebuilt the portable Windows executable with PyInstaller `6.19.0`.
+- Executable startup smoke test passed: `ProLOG.exe` stayed alive for 6 seconds and was stopped manually.
+
 ## 2026-07-30 - Password authorization and role access
 
 ### Added

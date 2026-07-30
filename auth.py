@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"
+VALID_ROLES = {ROLE_ADMIN, ROLE_USER}
 SCHEMA_VERSION = 1
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_ITERATIONS = 260_000
@@ -113,6 +114,40 @@ class AuthService:
     def list_users(self) -> list[UserAccount]:
         return self.load_profile().users
 
+    def create_user(self, username: str, password: str, role: str = ROLE_USER) -> None:
+        profile = self.load_profile()
+        self._validate_user_input(profile, username, password, role)
+        profile.users.append(
+            UserAccount(
+                username=username.strip(),
+                role=_normalize_role(role),
+                password_hash=_hash_password(password),
+            )
+        )
+        self.save_profile(profile)
+
+    def update_user(self, current_username: str, username: str, role: str, password: str = "") -> None:
+        profile = self.load_profile()
+        account = self._find_user(profile, current_username)
+        if account is None:
+            raise ValueError("Пользователь не найден")
+        self._validate_user_input(profile, username, password, role, current_username=current_username, password_required=False)
+        account.username = username.strip()
+        account.role = _normalize_role(role)
+        if password:
+            account.password_hash = _hash_password(password)
+        self._ensure_admin_exists(profile.users)
+        self.save_profile(profile)
+
+    def delete_user(self, username: str) -> None:
+        profile = self.load_profile()
+        account = self._find_user(profile, username)
+        if account is None:
+            raise ValueError("Пользователь не найден")
+        profile.users = [user for user in profile.users if user.username.casefold() != username.strip().casefold()]
+        self._ensure_admin_exists(profile.users)
+        self.save_profile(profile)
+
     def load_profile(self) -> AuthProfile:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
@@ -132,6 +167,32 @@ class AuthService:
             if account.username.casefold() == normalized:
                 return account
         return None
+
+    def _validate_user_input(
+        self,
+        profile: AuthProfile,
+        username: str,
+        password: str,
+        role: str,
+        current_username: str = "",
+        password_required: bool = True,
+    ) -> None:
+        normalized_username = username.strip().casefold()
+        normalized_current = current_username.strip().casefold()
+        if not normalized_username:
+            raise ValueError("Укажите имя пользователя")
+        if role not in VALID_ROLES:
+            raise ValueError("Выберите роль пользователя")
+        if password_required or password:
+            _validate_password(password, "пользователя")
+        for account in profile.users:
+            is_current = normalized_current and account.username.casefold() == normalized_current
+            if account.username.casefold() == normalized_username and not is_current:
+                raise ValueError("Пользователь с таким именем уже существует")
+
+    def _ensure_admin_exists(self, users: list[UserAccount]) -> None:
+        if not any(user.role == ROLE_ADMIN for user in users):
+            raise ValueError("Должен остаться хотя бы один руководитель")
 
     def _validate_registration(self, data: RegistrationData) -> None:
         required = {
@@ -157,6 +218,10 @@ def role_label(role: str) -> str:
     if role == ROLE_ADMIN:
         return "Руководитель"
     return "Пользователь"
+
+
+def _normalize_role(role: str) -> str:
+    return role if role in VALID_ROLES else ROLE_USER
 
 
 def _validate_password(password: str, owner: str) -> None:
