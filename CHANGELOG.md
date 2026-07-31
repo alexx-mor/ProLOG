@@ -1,5 +1,28 @@
 ﻿# Changelog
 
+## 2026-07-31 - WorkBot inbox integration
+
+### Added
+
+- Added an administrator-only `Входящие отчеты` screen for reviewing WorkBot reports before they enter the production work log.
+- Added read-only synchronization with a selected WorkBot SQLite database, background progress indication, status filtering and editable resolution fields.
+- Added direct MAX user bindings to `Employees.id` and confirmed alias registries for employees, objects and locations.
+- Added revision-aware, idempotent import storage. Repeated checks do not duplicate rows, while edited MAX messages create a visible new revision.
+- Added explicit display of WorkBot parsing failures and manual reject/import actions.
+
+### Changed
+
+- Upgraded worked hours from integer handling to two-decimal handling throughout models, forms, legacy Excel import, reports and analytics.
+- Added validation of the combined daily total so one employee cannot exceed 24 hours across several entries.
+- Bumped the application and Windows executable version to `0.2.0`.
+
+### Verified
+
+- All project tests pass: `16 passed`.
+- The current WorkBot database produced 1,777 inbox rows, including seven fractional-hour reports and one parsing failure.
+- Repeated synchronization of the unchanged source produced no duplicate inbox rows.
+- Qt offscreen smoke test passed for the new inbox widget.
+
 ## 2026-07-30 - Packaged authentication compatibility
 
 ### Fixed

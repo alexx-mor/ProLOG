@@ -6,6 +6,7 @@ import re
 from datetime import datetime, time, timedelta
 from typing import Any
 
+from hours import normalize_hours
 from services import NON_WORK_LOCATIONS
 
 WORK_TYPE_DEFAULT = "Прочее"
@@ -54,21 +55,21 @@ def normalize_position(value: str) -> str:
     return POSITION_ALIASES.get(normalized, clean_text(value).capitalize())
 
 
-def parse_hours(value: Any) -> int:
+def parse_hours(value: Any) -> float:
     if value is None or value == "":
         return 0
     if isinstance(value, datetime):
-        return _round_hours(value.hour + value.minute / 60 + value.second / 3600)
+        return normalize_hours(value.hour + value.minute / 60 + value.second / 3600)
     if isinstance(value, time):
-        return _round_hours(value.hour + value.minute / 60 + value.second / 3600)
+        return normalize_hours(value.hour + value.minute / 60 + value.second / 3600)
     if isinstance(value, timedelta):
-        return _round_hours(value.total_seconds() / 3600)
+        return normalize_hours(value.total_seconds() / 3600)
     if isinstance(value, (int, float)):
         hours = float(value * 24 if 0 < value < 1 else value)
-        return _round_hours(hours)
+        return normalize_hours(hours)
     text = clean_text(value).replace(",", ".").casefold().replace("ч", "")
     try:
-        return _round_hours(float(text))
+        return normalize_hours(text)
     except ValueError:
         return 0
 
@@ -145,7 +146,3 @@ def make_import_comment(sheet_name: str, row_number: int, position_text: str, le
 
 def is_non_work_location(location_name: str) -> bool:
     return location_name in NON_WORK_LOCATIONS
-
-
-def _round_hours(value: float) -> int:
-    return int(round(value))

@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from category_rules import normalize_pay_category
+from hours import normalize_hours
 from models import Employee, PayRate, WorkCalendarDay, WorkDayType, WorkLogEntry
 
 DEFAULT_MONTHLY_HOURS_NORM = 168
@@ -17,8 +18,8 @@ MONEY_QUANT = Decimal("0.01")
 class AnalyticsSummary:
     employees_count: int = 0
     entries_count: int = 0
-    total_hours: int = 0
-    person_hours: int = 0
+    total_hours: float = 0.0
+    person_hours: float = 0.0
     payroll: Decimal = Decimal("0")
 
 
@@ -27,8 +28,8 @@ class ObjectAnalyticsRow:
     object_name: str
     employees_count: int
     entries_count: int
-    total_hours: int
-    person_hours: int
+    total_hours: float
+    person_hours: float
     payroll: Decimal
 
 
@@ -38,8 +39,8 @@ class ProductAnalyticsRow:
     product_name: str
     employees_count: int
     entries_count: int
-    total_hours: int
-    person_hours: int
+    total_hours: float
+    person_hours: float
     payroll: Decimal
 
 
@@ -50,7 +51,7 @@ class EmployeeAnalyticsRow:
     category: str
     objects_count: int
     entries_count: int
-    total_hours: int
+    total_hours: float
     payroll: Decimal
 
 
@@ -59,7 +60,7 @@ class WorkTypeAnalyticsRow:
     work_type_name: str
     employees_count: int
     entries_count: int
-    total_hours: int
+    total_hours: float
     payroll: Decimal
 
 
@@ -69,7 +70,7 @@ class DateAnalyticsRow:
     day_type: str
     employees_count: int
     entries_count: int
-    total_hours: int
+    total_hours: float
     payroll: Decimal
 
 
@@ -88,10 +89,10 @@ class _GroupAccumulator:
     name: str
     employees: set[int] = field(default_factory=set)
     entries_count: int = 0
-    total_hours: int = 0
+    total_hours: float = 0.0
     payroll: Decimal = Decimal("0")
 
-    def add(self, employee_id: int, hours: int, payroll: Decimal) -> None:
+    def add(self, employee_id: int, hours: float, payroll: Decimal) -> None:
         self.employees.add(employee_id)
         self.entries_count += 1
         self.total_hours += hours
@@ -104,10 +105,10 @@ class _ProductAccumulator:
     product_name: str
     employees: set[int] = field(default_factory=set)
     entries_count: int = 0
-    total_hours: int = 0
+    total_hours: float = 0.0
     payroll: Decimal = Decimal("0")
 
-    def add(self, employee_id: int, hours: int, payroll: Decimal) -> None:
+    def add(self, employee_id: int, hours: float, payroll: Decimal) -> None:
         self.employees.add(employee_id)
         self.entries_count += 1
         self.total_hours += hours
@@ -121,10 +122,10 @@ class _EmployeeAccumulator:
     category: str
     objects: set[str] = field(default_factory=set)
     entries_count: int = 0
-    total_hours: int = 0
+    total_hours: float = 0.0
     payroll: Decimal = Decimal("0")
 
-    def add(self, object_name: str, hours: int, payroll: Decimal) -> None:
+    def add(self, object_name: str, hours: float, payroll: Decimal) -> None:
         if object_name:
             self.objects.add(object_name)
         self.entries_count += 1
@@ -161,7 +162,7 @@ def build_analytics(
         position_name = employee.position if employee else ""
         category = normalize_pay_category(employee.category if employee else "")
         pay_rate = pay_rates_by_key.get((position_name.casefold(), normalize_pay_category(category)))
-        hours = int(entry.hours or 0)
+        hours = normalize_hours(entry.hours)
         payroll = _entry_payroll(hours, pay_rate, monthly_norm, entry, calendar_by_date)
         object_name = entry.object_name or "Без объекта"
         product_name = entry.product_name or "Без изделия"
@@ -262,7 +263,7 @@ def format_money(value: Decimal) -> str:
 
 
 def _entry_payroll(
-    hours: int,
+    hours: float,
     pay_rate: PayRate | None,
     monthly_hours_norm: int,
     entry: WorkLogEntry,
@@ -275,8 +276,8 @@ def _entry_payroll(
         return Decimal("0")
     multiplier = _payroll_multiplier(pay_rate, entry, calendar_by_date)
     if pay_rate.salary_type == "monthly":
-        return salary / Decimal(monthly_hours_norm) * Decimal(hours) * multiplier
-    return salary * Decimal(hours) * multiplier
+        return salary / Decimal(monthly_hours_norm) * Decimal(str(hours)) * multiplier
+    return salary * Decimal(str(hours)) * multiplier
 
 
 def _payroll_base_salary(pay_rate: PayRate, entry: WorkLogEntry) -> Decimal:

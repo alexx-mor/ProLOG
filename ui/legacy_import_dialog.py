@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
-    QSpinBox,
+    QDoubleSpinBox,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -457,7 +457,11 @@ class LegacyRowResolutionDialog(QDialog):
         self.location = QComboBox()
         self.object = QComboBox()
         self.work_type = QComboBox()
-        self.hours = QSpinBox()
+        self.hours = QDoubleSpinBox()
+        self.hours.setDecimals(2)
+        self.hours.setSingleStep(0.25)
+        self.hours.setRange(0.0, 24.0)
+        self.hours.setSuffix(" ч")
         self.description = QTextEdit()
         self.comment = QTextEdit()
         self.skip_reason = QLineEdit(row.skip_reason)
@@ -478,7 +482,7 @@ class LegacyRowResolutionDialog(QDialog):
         row.current_location = self.location.currentText().strip()
         row.object_name = self.object.currentText().strip()
         row.work_type = self.work_type.currentText().strip()
-        row.hours = int(self.hours.value())
+        row.hours = float(self.hours.value())
         row.description = self.description.toPlainText().strip()
         row.comment = self.comment.toPlainText().strip()
         row.skip_reason = self.skip_reason.text().strip()
@@ -496,7 +500,7 @@ class LegacyRowResolutionDialog(QDialog):
         self._fill_directory_combo(self.object, objects, self.row.object_name, editable=True)
         self._fill_directory_combo(self.work_type, work_types, self.row.work_type, editable=True)
         self.hours.setRange(0, 24)
-        self.hours.setValue(max(0, min(24, int(self.row.hours))))
+        self.hours.setValue(max(0.0, min(24.0, float(self.row.hours))))
         self.description.setPlainText(self.row.description or self.row.source.description)
         self.description.setMinimumHeight(110)
         self.comment.setPlainText(self.row.comment)

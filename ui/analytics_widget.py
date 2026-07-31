@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from analytics import AnalyticsResult, format_money
+from hours import format_hours
 from models import DirectoryItem, Employee, ProductItem
 from ui.worklog_widget import CalendarDateEdit
 
@@ -107,8 +108,8 @@ class AnalyticsWidget(QWidget):
     def set_result(self, result: AnalyticsResult) -> None:
         self.summary_labels["employees"].setText(str(result.summary.employees_count))
         self.summary_labels["entries"].setText(str(result.summary.entries_count))
-        self.summary_labels["hours"].setText(str(result.summary.total_hours))
-        self.summary_labels["person_hours"].setText(str(result.summary.person_hours))
+        self.summary_labels["hours"].setText(format_hours(result.summary.total_hours))
+        self.summary_labels["person_hours"].setText(format_hours(result.summary.person_hours))
         self.summary_labels["payroll"].setText(format_money(result.summary.payroll))
         self._fill_object_table(result)
         self._fill_product_table(result)
@@ -217,8 +218,8 @@ class AnalyticsWidget(QWidget):
                 item.object_name,
                 item.employees_count,
                 item.entries_count,
-                item.total_hours,
-                item.person_hours,
+                format_hours(item.total_hours),
+                format_hours(item.person_hours),
                 format_money(item.payroll),
             ]
             self._set_row(self.object_table, row, values)
@@ -231,8 +232,8 @@ class AnalyticsWidget(QWidget):
                 item.product_name,
                 item.employees_count,
                 item.entries_count,
-                item.total_hours,
-                item.person_hours,
+                format_hours(item.total_hours),
+                format_hours(item.person_hours),
                 format_money(item.payroll),
             ]
             self._set_row(self.product_table, row, values)
@@ -246,7 +247,7 @@ class AnalyticsWidget(QWidget):
                 item.category,
                 item.objects_count,
                 item.entries_count,
-                item.total_hours,
+                format_hours(item.total_hours),
                 format_money(item.payroll),
             ]
             self._set_row(self.employee_table, row, values)
@@ -258,7 +259,7 @@ class AnalyticsWidget(QWidget):
                 item.work_type_name,
                 item.employees_count,
                 item.entries_count,
-                item.total_hours,
+                format_hours(item.total_hours),
                 format_money(item.payroll),
             ]
             self._set_row(self.work_type_table, row, values)
@@ -271,7 +272,7 @@ class AnalyticsWidget(QWidget):
                 item.day_type,
                 item.employees_count,
                 item.entries_count,
-                item.total_hours,
+                format_hours(item.total_hours),
                 format_money(item.payroll),
             ]
             self._set_row(self.date_table, row, values)

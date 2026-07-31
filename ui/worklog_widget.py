@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import date
 from html import escape
 
-from PySide6.QtCore import QDate, QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QIntValidator, QKeyEvent
+from PySide6.QtCore import QDate, QEvent, QRegularExpression, Qt, QTimer, Signal
+from PySide6.QtGui import QKeyEvent, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from hours import format_hours, parse_hours
 from models import Employee, ProductItem, WorkLogEntry
 
 
@@ -76,8 +77,11 @@ class WorkLogWidget(QWidget):
         self.description.setMinimumHeight(60)
         self.description.setFixedHeight(110)
         self.hours = QLineEdit("0")
-        self.hours.setValidator(QIntValidator(0, 24, self.hours))
-        self.hours.setPlaceholderText("0")
+        hours_pattern = QRegularExpression(
+            r"^(?:|(?:[0-9]|1[0-9]|2[0-3])(?:[.,][0-9]{0,2})?|24(?:[.,]0{0,2})?)$"
+        )
+        self.hours.setValidator(QRegularExpressionValidator(hours_pattern, self.hours))
+        self.hours.setPlaceholderText("Например: 7,5")
         self.comment = QTextEdit()
         self.comment.setMaximumHeight(70)
         self.save_button = QPushButton("Сохранить запись")
@@ -199,7 +203,7 @@ class WorkLogWidget(QWidget):
             product_id=product_id,
             work_type_id=self.work_type.currentData(),
             description=self.description.toPlainText(),
-            hours=int(self.hours.text() or 0),
+            hours=parse_hours(self.hours.text()),
             comment=self.comment.toPlainText(),
             location_name=location_name,
             object_name=object_name,
@@ -230,7 +234,7 @@ class WorkLogWidget(QWidget):
         self._sync_product_combo(entry.product_id)
         self._select_or_add(self.work_type, entry.work_type_id, entry.work_type_name)
         self.description.setPlainText(entry.description)
-        self.hours.setText(str(int(entry.hours)))
+        self.hours.setText(format_hours(entry.hours))
         self.comment.setPlainText(entry.comment)
 
     def clear_form(self) -> None:
@@ -250,7 +254,7 @@ class WorkLogWidget(QWidget):
                 entry.product_name,
                 entry.work_type_name,
                 entry.description,
-                str(int(entry.hours)),
+                format_hours(entry.hours),
             ]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)

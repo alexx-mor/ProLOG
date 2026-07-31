@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from hours import format_hours
 from models import DirectoryItem, Employee, WorkLogEntry
 from ui.worklog_widget import CalendarDateEdit
 
@@ -111,7 +112,7 @@ class ReportViewerWidget(QWidget):
                 entry.product_name,
                 entry.work_type_name,
                 entry.description,
-                int(entry.hours),
+                format_hours(entry.hours),
                 entry.comment,
             ]
             for column, value in enumerate(values):

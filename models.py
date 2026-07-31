@@ -117,7 +117,7 @@ class WorkLogEntry:
     object_id: int | None
     work_type_id: int | None
     description: str
-    hours: int
+    hours: float
     product_id: int | None = None
     comment: str = ""
     created_at: datetime | None = None
@@ -143,3 +143,4 @@ class AppSettings:
     worklog_column_widths: list[int] = field(default_factory=list)
     initial_setup_done: bool = False
     monthly_hours_norm: int = 168
+    workbot_database_path: str = ""

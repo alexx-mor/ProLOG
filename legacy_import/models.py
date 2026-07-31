@@ -31,7 +31,7 @@ class LegacyReportRow:
     description: str
     position_text: str
     employee_text: str
-    hours: int
+    hours: float
     object_text: str
     legacy_location_text: str
 
@@ -63,7 +63,7 @@ class ResolvedLegacyRow:
     object_name: str = ""
     work_type: str = ""
     description: str = ""
-    hours: int = 0
+    hours: float = 0.0
     comment: str = ""
     skip_reason: str = ""
     issues: list[ImportIssue] = field(default_factory=list)

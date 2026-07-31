@@ -8,6 +8,7 @@ from analytics import AnalyticsResult, build_analytics
 from category_rules import STUDENT_CATEGORY, category_values_from_rule, normalize_employee_category
 from directory_files import load_position_category_map
 from database import DirectoryRepository, EmployeeRepository, WorkLogRepository
+from hours import normalize_hours
 from models import Employee, ProductItem, WorkCalendarDay, WorkLogEntry
 from production_calendar import API_NOTE_PREFIX, IsDayOffCalendarProvider
 
@@ -260,8 +261,13 @@ class WorkLogService:
         self.directories = directories
 
     def save(self, entry: WorkLogEntry) -> int:
+        self.validate(entry)
+        return self.worklogs.save(entry)
+
+    def validate(self, entry: WorkLogEntry) -> None:
         if not entry.employee_id:
             raise ValueError("Выберите сотрудника")
+        entry.hours = normalize_hours(entry.hours)
         is_non_work_location = entry.location_name in NON_WORK_LOCATIONS
         if not is_non_work_location and not entry.description.strip():
             raise ValueError("Заполните описание работ")
@@ -271,7 +277,13 @@ class WorkLogService:
             raise ValueError("За день можно указать не более 24 часов")
         if entry.hours == 0 and not is_non_work_location:
             raise ValueError("Для выбранного местонахождения укажите часы больше нуля")
-        return self.worklogs.save(entry)
+        existing_hours = sum(
+            item.hours
+            for item in self.worklogs.list_for_employee_date(entry.employee_id, entry.work_date)
+            if item.id != entry.id
+        )
+        if normalize_hours(existing_hours + entry.hours) > 24:
+            raise ValueError("Суммарно за день можно указать не более 24 часов")
 
     def for_employee_date(self, employee_id: int, work_date: date) -> list[WorkLogEntry]:
         return self.worklogs.list_for_employee_date(employee_id, work_date)
@@ -285,7 +297,7 @@ class WorkLogService:
             return None
         last.id = None
         last.work_date = target_date
-        last.hours = 0
+        last.hours = 0.0
         last.comment = ""
         return last
 

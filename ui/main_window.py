@@ -18,6 +18,7 @@ from app_modules import (
     MODULE_REPORT_EXPORT,
     MODULE_UPDATES,
     MODULE_USERS,
+    MODULE_WORKBOT_INBOX,
     role_can_access,
 )
 from auth import AuthService, AuthSession, role_label
@@ -25,6 +26,8 @@ from config import ConfigManager
 from constants import APP_ICON_FILE, APP_NAME
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from legacy_import.service import LegacyExcelImportService
+from integrations.workbot.repository import WorkBotRepository
+from integrations.workbot.service import WorkBotIntegrationService
 from services import AnalyticsService, DirectoryService, EmployeeService, WorkLogService
 from update_checker import UpdateChecker
 from ui.auth_dialogs import LoginDialog, UserManagementDialog
@@ -36,6 +39,7 @@ from ui.report_viewer_widget import ReportViewerWidget
 from ui.setup_wizard import InitialSetupDialog
 from ui.style import APP_STYLESHEET
 from ui.worklog_widget import WorkLogWidget
+from ui.workbot_inbox import WorkBotInboxWidget
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +58,12 @@ class MainWindow(QMainWindow):
         self.worklogs = WorkLogService(WorkLogRepository(database), self.directories)
         self.analytics = AnalyticsService(self.worklogs, self.employees, self.directories)
         self.legacy_importer = LegacyExcelImportService(database, self.employees, self.directories, self.worklogs)
+        self.workbot = WorkBotIntegrationService(
+            WorkBotRepository(database),
+            self.employees,
+            self.directories,
+            self.worklogs,
+        )
         self.config_manager = ConfigManager()
         self.config = self.config_manager.load()
         self._startup_checked = False
@@ -62,6 +72,9 @@ class MainWindow(QMainWindow):
         self.worklog_widget = WorkLogWidget()
         self.report_viewer = ReportViewerWidget()
         self.analytics_widget = AnalyticsWidget()
+        self.workbot_inbox = WorkBotInboxWidget(self.workbot)
+        self.workbot_inbox.set_source_path(self.config.workbot_database_path)
+        self.workbot_inbox.set_reviewer(self.auth_session.username)
         self._build_menu()
         self._build_layout()
         self._connect()
@@ -73,6 +86,7 @@ class MainWindow(QMainWindow):
         self.refresh_employees()
         self.refresh_report_viewer()
         self.refresh_analytics()
+        self.workbot_inbox.refresh()
         self.employee_widget.apply_column_widths(self.config.employee_column_widths)
         self.worklog_widget.apply_column_widths(self.config.worklog_column_widths)
         if self.config.check_updates_on_startup:
@@ -122,6 +136,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.splitter, "Заполнение отчетов")
         self.tabs.addTab(self.report_viewer, "Просмотр отчетов")
         self.tabs.addTab(self.analytics_widget, "Аналитика")
+        self.tabs.addTab(self.workbot_inbox, "Входящие отчеты")
         self.setCentralWidget(self.tabs)
 
     def _initial_splitter_sizes(self) -> list[int]:
@@ -161,6 +176,9 @@ class MainWindow(QMainWindow):
         self.report_viewer.filters_changed.connect(self.refresh_report_viewer)
         self.report_viewer.entry_open_requested.connect(self.open_worklog_entry)
         self.analytics_widget.filters_changed.connect(self.refresh_analytics)
+        self.workbot_inbox.source_path_changed.connect(self._save_workbot_source_path)
+        self.workbot_inbox.imported.connect(self.refresh_worklogs)
+        self.workbot_inbox.status_message.connect(lambda message: self.statusBar().showMessage(message, 10000))
 
     def refresh_directories(self) -> None:
         active_objects = self.directories.list("objects")
@@ -177,6 +195,7 @@ class MainWindow(QMainWindow):
         self.report_viewer.set_objects(self.directories.list_all("objects"))
         self.analytics_widget.set_objects(self.directories.list_all("objects"))
         self.analytics_widget.set_products(self.directories.list_products(active_only=False))
+        self._refresh_workbot_reference_data()
 
     def refresh_employees(self, search: str = "") -> None:
         self.employee_widget.set_employees(
@@ -188,6 +207,7 @@ class MainWindow(QMainWindow):
         )
         self.report_viewer.set_employees(self.employees.list())
         self.analytics_widget.set_employees(self.employees.list())
+        self._refresh_workbot_reference_data()
 
     def refresh_worklogs(self) -> None:
         self.refresh_employee_worklog_table()
@@ -237,6 +257,7 @@ class MainWindow(QMainWindow):
         can_export_reports = role_can_access(self.auth_session.role, MODULE_REPORT_EXPORT)
         can_view_payroll = role_can_access(self.auth_session.role, MODULE_PAYROLL)
         can_check_updates = role_can_access(self.auth_session.role, MODULE_UPDATES)
+        can_view_workbot = role_can_access(self.auth_session.role, MODULE_WORKBOT_INBOX)
         self.import_action.setEnabled(is_employee_admin)
         self.export_employees_action.setEnabled(is_employee_admin)
         self.directories_action.setEnabled(can_edit_directories)
@@ -250,7 +271,25 @@ class MainWindow(QMainWindow):
             self.tabs.setTabVisible(analytics_index, can_view_payroll)
             if not can_view_payroll and self.tabs.currentWidget() is self.analytics_widget:
                 self.tabs.setCurrentIndex(0)
+        workbot_index = self.tabs.indexOf(self.workbot_inbox)
+        if workbot_index >= 0:
+            self.tabs.setTabVisible(workbot_index, can_view_workbot)
+            if not can_view_workbot and self.tabs.currentWidget() is self.workbot_inbox:
+                self.tabs.setCurrentIndex(0)
         self.setWindowTitle(f"{APP_NAME} - {self.auth_session.username}")
+
+    def _refresh_workbot_reference_data(self) -> None:
+        self.workbot_inbox.set_reference_data(
+            self.employees.list(),
+            self.directories.list_all("locations"),
+            self.directories.list_all("objects"),
+            self.directories.list_all("work_types"),
+        )
+
+    def _save_workbot_source_path(self, value: str) -> None:
+        self.config.workbot_database_path = value
+        self.config_manager.save(self.config)
+        self.statusBar().showMessage("Путь к базе WorkBot сохранен", 5000)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -268,12 +307,14 @@ class MainWindow(QMainWindow):
         )
         if dialog.exec():
             self.auth_session = dialog.session()
+            self.workbot_inbox.set_reviewer(self.auth_session.username)
             self._sync_config_from_auth_profile()
             self._apply_access_policy()
             self.refresh_directories()
             self.refresh_employees()
             self.refresh_report_viewer()
             self.refresh_analytics()
+            self.workbot_inbox.refresh()
             self.statusBar().showMessage(
                 f"Выполнен вход: {self.auth_session.username} ({role_label(self.auth_session.role)})",
                 7000,

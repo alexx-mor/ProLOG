@@ -1134,7 +1134,7 @@ class WorkLogRepository:
             product_id=row["product_id"],
             work_type_id=row["work_type_id"],
             description=row["description"] or "",
-            hours=int(row["hours"] or 0),
+            hours=float(row["hours"] or 0),
             comment=row["comment"] or "",
             created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
             updated_at=datetime.fromisoformat(row["updated_at"]) if row["updated_at"] else None,
@@ -1295,6 +1295,73 @@ CREATE TABLE IF NOT EXISTS WorkCalendarDays (
     note TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS MaxUserBindings (
+    max_user_id INTEGER PRIMARY KEY,
+    employee_id INTEGER NOT NULL REFERENCES Employees(id),
+    username_snapshot TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS EmployeeAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    employee_id INTEGER NOT NULL REFERENCES Employees(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ObjectAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    object_id INTEGER NOT NULL REFERENCES Objects(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS LocationAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    location_id INTEGER NOT NULL REFERENCES Locations(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS WorkBotImportRows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    max_message_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    source_index INTEGER NOT NULL,
+    source_kind TEXT NOT NULL,
+    sender_id INTEGER NOT NULL,
+    chat_id INTEGER,
+    received_at TEXT NOT NULL DEFAULT '',
+    content_hash TEXT NOT NULL,
+    raw_text TEXT NOT NULL DEFAULT '',
+    source_fragment TEXT NOT NULL DEFAULT '',
+    employee_text TEXT NOT NULL DEFAULT '',
+    work_date TEXT NOT NULL,
+    work_types TEXT NOT NULL DEFAULT '',
+    hours REAL NOT NULL DEFAULT 0,
+    object_text TEXT NOT NULL DEFAULT '',
+    location_text TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0,
+    employee_id INTEGER REFERENCES Employees(id),
+    object_id INTEGER REFERENCES Objects(id),
+    location_id INTEGER REFERENCES Locations(id),
+    work_type_id INTEGER REFERENCES WorkTypes(id),
+    status TEXT NOT NULL DEFAULT 'new',
+    error_message TEXT NOT NULL DEFAULT '',
+    worklog_entry_id INTEGER UNIQUE REFERENCES WorkLogEntries(id),
+    imported_at TEXT,
+    reviewed_by TEXT NOT NULL DEFAULT '',
+    reviewed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(max_message_id, revision, source_index)
+);
+
 CREATE TABLE IF NOT EXISTS Settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -1307,6 +1374,9 @@ CREATE INDEX IF NOT EXISTS idx_payrates_position ON PayRates(position_id);
 CREATE INDEX IF NOT EXISTS idx_products_object ON Products(object_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON ImportRows(batch_id);
 CREATE INDEX IF NOT EXISTS idx_work_calendar_date ON WorkCalendarDays(work_date);
+CREATE INDEX IF NOT EXISTS idx_workbot_import_status ON WorkBotImportRows(status);
+CREATE INDEX IF NOT EXISTS idx_workbot_import_date ON WorkBotImportRows(work_date);
+CREATE INDEX IF NOT EXISTS idx_workbot_import_message ON WorkBotImportRows(max_message_id, revision);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_completed_hash
     ON ImportBatches(source_file_hash)
     WHERE status = 'completed';
