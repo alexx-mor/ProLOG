@@ -11,6 +11,7 @@ data/*.log
 data/*.json
 data/*.out
 data/*.err
+data/logs/
 exports/*.xlsx
 private/
 /*.xlsx
