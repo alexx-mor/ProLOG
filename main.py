@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
@@ -40,10 +41,24 @@ def main() -> int:
     ensure_app_directories()
     setup_logging()
     install_exception_hook()
-    database = Database()
-    database.initialize()
     app = QApplication(sys.argv)
     app.setStyleSheet(APP_STYLESHEET)
+    settings = ConfigManager().load()
+    database = Database(Path(settings.prolog_database_path)) if settings.prolog_database_path else Database()
+    try:
+        if settings.prolog_database_path and not database.path.is_file():
+            raise FileNotFoundError("выбранный файл не найден")
+        database.initialize()
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Failed to initialize ProLOG database")
+        QMessageBox.critical(
+            None,
+            "База данных ProLOG",
+            "Не удалось открыть выбранную базу данных:\n"
+            f"{database.path}\n\n{exc}\n\n"
+            "Проверьте доступ к серверу или исправьте путь в config.json.",
+        )
+        return 1
     auth_service = AuthService()
     session = _authorize(auth_service)
     if session is None:

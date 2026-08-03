@@ -208,9 +208,12 @@ class LoginDialog(QDialog):
         users_button = QPushButton("Пользователи")
         users_button.setVisible(self.allow_user_management and self.current_session is not None)
         login_button.setMinimumWidth(120)
+        login_button.setDefault(True)
+        login_button.setAutoDefault(True)
         exit_button.setMinimumWidth(110)
         users_button.setMinimumWidth(130)
         login_button.clicked.connect(self.accept)
+        self.password.returnPressed.connect(self.accept)
         exit_button.clicked.connect(self.reject)
         users_button.clicked.connect(self._manage_users)
         buttons = QHBoxLayout()
@@ -222,8 +225,9 @@ class LoginDialog(QDialog):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
         if self.current_session is None:
-            title = QLabel("Вход в ProLOG")
+            title = QLabel("Добро пожаловать в ProLOG!")
             title.setObjectName("DialogTitle")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(title)
             layout.addLayout(form)
         else:

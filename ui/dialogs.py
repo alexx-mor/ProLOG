@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import webbrowser
+import os
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 from PySide6.QtCore import QDate, QEvent, QSize, Qt
 from PySide6.QtGui import QAction, QBrush, QColor, QIcon, QIntValidator, QPainter, QPen, QPixmap, QTextCharFormat
@@ -15,6 +17,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -38,7 +41,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from constants import APP_LOGO_FILE, APP_NAME, APP_VERSION, DIRECTORY_ICONS_DIR
+from config import ConfigManager
+from constants import APP_LOGO_FILE, APP_NAME, APP_VERSION, DATABASE_FILE, DIRECTORY_ICONS_DIR
+from database_registry import (
+    PROLOG_DATABASE,
+    WORKBOT_DATABASE,
+    DatabaseRegistry,
+    DatabaseSource,
+)
 from directory_files import dictionary_statuses, merge_dictionary_updates
 from category_rules import NO_CATEGORY, STUDENT_CATEGORY
 from models import DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
@@ -754,6 +764,79 @@ class PayRateDialog(QDialog):
         )
 
 
+class DatabaseSourceDialog(QDialog):
+    """Adds an existing ProLOG or WorkBot SQLite file to the registry."""
+
+    def __init__(self, source: DatabaseSource | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self.source = source
+        self.setWindowTitle("База данных")
+        self.setFixedWidth(720)
+        self.name = QLineEdit(source.name if source else "")
+        self.kind = QComboBox()
+        self.kind.addItem("База ProLOG", PROLOG_DATABASE)
+        self.kind.addItem("База WorkBot", WORKBOT_DATABASE)
+        if source:
+            index = self.kind.findData(source.kind)
+            self.kind.setCurrentIndex(max(0, index))
+        self.path = QLineEdit(source.path if source else "")
+        self.path.setReadOnly(True)
+        browse_button = QPushButton("Обзор")
+        browse_button.clicked.connect(self._browse)
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.addWidget(self.path, 1)
+        path_row.addWidget(browse_button)
+        path_panel = QWidget()
+        path_panel.setLayout(path_row)
+        form = QFormLayout()
+        form.addRow("Название", self.name)
+        form.addRow("Назначение", self.kind)
+        form.addRow("Файл", path_panel)
+        save_button = QPushButton("Сохранить")
+        cancel_button = QPushButton("Отмена")
+        save_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(save_button)
+        buttons.addWidget(cancel_button)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+
+    def values(self) -> tuple[str, str, str]:
+        return self.name.text().strip(), str(self.kind.currentData()), self.path.text().strip()
+
+    def accept(self) -> None:
+        if not self.name.text().strip():
+            self._warn("Укажите понятное название базы данных")
+            return
+        if not self.path.text().strip():
+            self._warn("Выберите файл базы данных")
+            return
+        super().accept()
+
+    def _browse(self) -> None:
+        current = str(Path(self.path.text()).parent) if self.path.text() else ""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите базу данных",
+            current,
+            "База SQLite (*.sqlite3 *.db);;Все файлы (*)",
+        )
+        if not file_name:
+            return
+        self.path.setText(file_name)
+        if not self.name.text().strip():
+            self.name.setText(Path(file_name).stem)
+
+    def _warn(self, message: str) -> None:
+        QMessageBox.warning(self, "База данных", message)
+
+
 class DirectoryDialog(QDialog):
     DIRECTORY_LABELS = {
         "locations": "Местонахождения",
@@ -764,6 +847,7 @@ class DirectoryDialog(QDialog):
         "objects": "Объекты",
         "products": "Изделия",
         "calendar": "Производственный календарь",
+        "databases": "Базы данных",
     }
     DIRECTORY_TITLES = {
         "locations": "Справочник местонахождений",
@@ -774,6 +858,7 @@ class DirectoryDialog(QDialog):
         "objects": "Справочник объектов",
         "products": "Справочник изделий",
         "calendar": "Производственный календарь",
+        "databases": "Справочник баз данных",
     }
 
     def __init__(
@@ -782,14 +867,27 @@ class DirectoryDialog(QDialog):
         parent=None,
         initial_key: str = "locations",
         can_edit_pay_rates: bool = True,
+        can_edit_databases: bool = True,
+        database_registry: DatabaseRegistry | None = None,
+        config_manager: ConfigManager | None = None,
+        app_settings=None,
+        current_database_path: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Справочники")
         self.resize(1320, 820)
         self.directory_service = directory_service
+        self.database_registry = database_registry or DatabaseRegistry()
+        self.config_manager = config_manager or ConfigManager()
+        self.app_settings = app_settings or self.config_manager.load()
+        self.current_database_path = current_database_path or DATABASE_FILE
+        self._database_sources: list[DatabaseSource] = []
+        self._database_statuses: dict[str, tuple[bool, str]] = {}
         self.directory_labels = dict(self.DIRECTORY_LABELS)
         if not can_edit_pay_rates:
             self.directory_labels.pop("pay_rates", None)
+        if not can_edit_databases:
+            self.directory_labels.pop("databases", None)
         self.current_key = initial_key if initial_key in self.directory_labels else next(iter(self.directory_labels))
         self._show_inactive_by_key = {
             key: self.directory_service.ui_setting(f"directory/show_inactive/{key}", "1") == "1"
@@ -841,6 +939,8 @@ class DirectoryDialog(QDialog):
         self.delete_button = QPushButton("Удалить")
         self.move_up_button = QPushButton("Вверх")
         self.move_down_button = QPushButton("Вниз")
+        self.use_database_button = QPushButton("Использовать")
+        self.check_database_button = QPushButton("Проверить")
         self.close_button = QPushButton("Закрыть")
         self._items = []
         self._row_items = []
@@ -870,6 +970,9 @@ class DirectoryDialog(QDialog):
             year = self.calendar_year.value()
             self._items = self.directory_service.list_calendar_days(date(year, 1, 1), date(year, 12, 31))
             self._refresh_calendar_view()
+            return
+        if self.current_key == "databases":
+            self._refresh_databases(needle)
             return
         if self.current_key == "products":
             self._populate_product_object_filter()
@@ -1063,6 +1166,48 @@ class DirectoryDialog(QDialog):
             if not item.is_active:
                 self._mark_disabled_row(row)
 
+    def _refresh_databases(self, needle: str = "") -> None:
+        sources = self.database_registry.list(
+            self.app_settings.prolog_database_path,
+            self.app_settings.workbot_database_path,
+        )
+        self._database_sources = [
+            item
+            for item in sources
+            if not needle
+            or needle in item.name.casefold()
+            or needle in item.path.casefold()
+        ]
+        self._items = self._database_sources
+        self.table.setRowCount(len(self._database_sources))
+        for row, source in enumerate(self._database_sources):
+            if source.id not in self._database_statuses:
+                self._database_statuses[source.id] = self.database_registry.check(source.path, source.kind)
+            available, status_text = self._database_statuses[source.id]
+            selected = self._database_selection_text(source)
+            values = [
+                source.name,
+                "ProLOG" if source.kind == PROLOG_DATABASE else "WorkBot",
+                source.path,
+                status_text,
+                selected,
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                item.setData(Qt.ItemDataRole.UserRole, source.id)
+                if column == 3:
+                    item.setForeground(QColor("#26834a" if available else "#b42318"))
+                self.table.setItem(row, column, item)
+
+    def _database_selection_text(self, source: DatabaseSource) -> str:
+        if source.kind == WORKBOT_DATABASE:
+            return "Да" if _same_path(source.path, self.app_settings.workbot_database_path) else ""
+        configured = self.app_settings.prolog_database_path or str(DATABASE_FILE)
+        if not _same_path(source.path, configured):
+            return ""
+        return "Да" if _same_path(source.path, str(self.current_database_path)) else "После перезапуска"
+
     def _populate_product_object_filter(self) -> None:
         current_id = self.product_object_filter.currentData()
         self.product_object_filter.blockSignals(True)
@@ -1168,6 +1313,8 @@ class DirectoryDialog(QDialog):
             self.delete_button,
             self.move_up_button,
             self.move_down_button,
+            self.use_database_button,
+            self.check_database_button,
         ):
             buttons.addWidget(button)
         buttons.addStretch()
@@ -1197,6 +1344,8 @@ class DirectoryDialog(QDialog):
         self.delete_button.clicked.connect(self._delete_item)
         self.move_up_button.clicked.connect(lambda: self._move_selected(-1))
         self.move_down_button.clicked.connect(lambda: self._move_selected(1))
+        self.use_database_button.clicked.connect(self._use_selected_database)
+        self.check_database_button.clicked.connect(self._check_selected_database)
         self.close_button.clicked.connect(self.accept)
         self.table.doubleClicked.connect(self._toggle_selected_active)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
@@ -1236,7 +1385,7 @@ class DirectoryDialog(QDialog):
         )
         self.refresh()
 
-    def _selected_id(self) -> int | None:
+    def _selected_id(self) -> int | str | None:
         row = self.table.currentRow()
         if row < 0:
             return None
@@ -1249,6 +1398,9 @@ class DirectoryDialog(QDialog):
         return cell.data(Qt.ItemDataRole.UserRole)
 
     def _selected_name(self) -> str:
+        if self.current_key == "databases":
+            item = self._selected_item()
+            return item.name if item else ""
         if self.current_key == "products":
             item = self._selected_item()
             return item.name if item else ""
@@ -1259,7 +1411,7 @@ class DirectoryDialog(QDialog):
         cell = self.table.item(row, 0)
         return cell.text() if row >= 0 and cell else ""
 
-    def _selected_item(self) -> DirectoryItem | None:
+    def _selected_item(self):
         row = self.table.currentRow()
         if self.current_key == "pay_rates":
             return self._row_items[row] if 0 <= row < len(self._row_items) else None
@@ -1273,6 +1425,16 @@ class DirectoryDialog(QDialog):
         return groups
 
     def _add_item(self) -> None:
+        if self.current_key == "databases":
+            dialog = DatabaseSourceDialog(parent=self)
+            if dialog.exec():
+                try:
+                    self.database_registry.add(*dialog.values())
+                except ValueError as exc:
+                    self._info(str(exc))
+                    return
+                self.refresh()
+            return
         if self.current_key == "pay_rates":
             self._info("Строки оплаты формируются автоматически из активных должностей и их категорий")
             return
@@ -1396,6 +1558,20 @@ class DirectoryDialog(QDialog):
         if item_id is None:
             self._info("Выберите строку")
             return
+        if self.current_key == "databases":
+            source = self._selected_item()
+            if source is None:
+                return
+            dialog = DatabaseSourceDialog(source, self)
+            if dialog.exec():
+                try:
+                    self.database_registry.update(source.id, *dialog.values())
+                    self._database_statuses.pop(source.id, None)
+                except ValueError as exc:
+                    self._info(str(exc))
+                    return
+                self.refresh()
+            return
         if self.current_key == "products":
             self.directory_service.set_product_active(item_id, is_active)
             self.refresh()
@@ -1442,6 +1618,20 @@ class DirectoryDialog(QDialog):
             )
 
     def _delete_item(self) -> None:
+        if self.current_key == "databases":
+            source = self._selected_item()
+            if source is None:
+                self._info("Выберите строку")
+                return
+            if self._database_selection_text(source):
+                self._info("Сначала выберите другую базу этого назначения")
+                return
+            if not self._ask(f"Удалить '{source.name}' из реестра? Сам файл удален не будет."):
+                return
+            self.database_registry.remove(source.id)
+            self._database_statuses.pop(source.id, None)
+            self.refresh()
+            return
         if self.current_key == "pay_rates":
             self._info("Строки оплаты удаляются из списка автоматически при изменении должностей или категорий")
             return
@@ -1485,6 +1675,44 @@ class DirectoryDialog(QDialog):
         self.refresh()
         self._select_row_by_id(item_id)
 
+    def _check_selected_database(self) -> None:
+        source = self._selected_item()
+        if self.current_key != "databases" or source is None:
+            self._info("Выберите базу данных")
+            return
+        result = self.database_registry.check(source.path, source.kind)
+        self._database_statuses[source.id] = result
+        self.refresh()
+        self._select_row_by_id(source.id)
+        self._info(result[1])
+
+    def _use_selected_database(self) -> None:
+        source = self._selected_item()
+        if self.current_key != "databases" or source is None:
+            self._info("Выберите базу данных")
+            return
+        available, message = self.database_registry.check(source.path, source.kind)
+        self._database_statuses[source.id] = (available, message)
+        if not available:
+            self.refresh()
+            self._info(message)
+            return
+        if source.kind == PROLOG_DATABASE:
+            self.app_settings.prolog_database_path = source.path
+            result_message = (
+                "База ProLOG выбрана. Она будет подключена после перезапуска программы. "
+                "Для сетевого файла необходимы стабильное подключение и регулярные резервные копии."
+                if not _same_path(source.path, str(self.current_database_path))
+                else "Эта база ProLOG уже используется."
+            )
+        else:
+            self.app_settings.workbot_database_path = source.path
+            result_message = "База WorkBot выбрана."
+        self.config_manager.save(self.app_settings)
+        self.refresh()
+        self._select_row_by_id(source.id)
+        self._info(result_message)
+
     def _select_row_by_id(self, item_id: int) -> None:
         for row in range(self.table.rowCount()):
             cell = self.table.item(row, 0)
@@ -1510,6 +1738,24 @@ class DirectoryDialog(QDialog):
         move_up_action = QAction("Переместить вверх", self)
         move_down_action = QAction("Переместить вниз", self)
         has_item = self._selected_id() is not None
+        if self.current_key == "databases":
+            use_action = QAction("Использовать", self)
+            check_action = QAction("Проверить", self)
+            for action in (rename_action, delete_action, use_action, check_action):
+                action.setEnabled(has_item)
+            add_action.triggered.connect(self._add_item)
+            rename_action.triggered.connect(self._rename_item)
+            delete_action.triggered.connect(self._delete_item)
+            use_action.triggered.connect(self._use_selected_database)
+            check_action.triggered.connect(self._check_selected_database)
+            menu.addAction(add_action)
+            menu.addAction(rename_action)
+            menu.addAction(use_action)
+            menu.addAction(check_action)
+            menu.addSeparator()
+            menu.addAction(delete_action)
+            menu.exec(self.table.viewport().mapToGlobal(position))
+            return
         if self.current_key == "pay_rates":
             rename_action.setEnabled(has_item)
             rename_action.triggered.connect(self._rename_item)
@@ -1642,6 +1888,20 @@ class DirectoryDialog(QDialog):
             self.table.setColumnWidth(0, 110)
             self.table.setColumnWidth(1, 190)
             self.table.setColumnWidth(3, 210)
+        elif self.current_key == "databases":
+            self.table.setColumnCount(5)
+            self.table.setHorizontalHeaderLabels(
+                ["Название", "Назначение", "Расположение", "Состояние", "Используется"]
+            )
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(0, 220)
+            self.table.setColumnWidth(1, 110)
+            self.table.setColumnWidth(3, 205)
+            self.table.setColumnWidth(4, 150)
         elif self.current_key == "employee_groups":
             self.table.setColumnCount(2)
             self.table.setHorizontalHeaderLabels(["Блок/Группа", "Статус"])
@@ -1683,19 +1943,22 @@ class DirectoryDialog(QDialog):
         is_pay_rates = self.current_key == "pay_rates"
         is_calendar = self.current_key == "calendar"
         is_products = self.current_key == "products"
+        is_databases = self.current_key == "databases"
         self.search.setVisible(not is_calendar)
-        self.show_inactive.setVisible(not is_pay_rates and not is_calendar)
+        self.show_inactive.setVisible(not is_pay_rates and not is_calendar and not is_databases)
         self.table.setVisible(not is_calendar)
         self.calendar_panel.setVisible(is_calendar)
         self.product_filter_panel.setVisible(is_products)
         self.add_button.setVisible(not is_pay_rates and not is_calendar)
         self.rename_button.setVisible(not is_calendar)
-        self.disable_button.setVisible(not is_pay_rates and not is_calendar)
-        self.restore_button.setVisible(not is_pay_rates and not is_calendar)
+        self.disable_button.setVisible(not is_pay_rates and not is_calendar and not is_databases)
+        self.restore_button.setVisible(not is_pay_rates and not is_calendar and not is_databases)
         self.delete_button.setVisible(not is_pay_rates and not is_calendar)
         is_ordered = self.current_key in {"objects", "products"}
         self.move_up_button.setVisible(is_ordered)
         self.move_down_button.setVisible(is_ordered)
+        self.use_database_button.setVisible(is_databases)
+        self.check_database_button.setVisible(is_databases)
 
     def _info(self, message: str) -> None:
         box = QMessageBox(self)
@@ -1744,6 +2007,12 @@ def _status_icon(color: str) -> QIcon:
     return QIcon(pixmap)
 
 
+def _same_path(first: str, second: str) -> bool:
+    if not first or not second:
+        return False
+    return os.path.normcase(os.path.abspath(first)) == os.path.normcase(os.path.abspath(second))
+
+
 def _directory_icon(key: str) -> QIcon:
     icon_file = DIRECTORY_ICONS_DIR / f"{key}.png"
     if icon_file.exists():
@@ -1770,6 +2039,7 @@ def _directory_icon(key: str) -> QIcon:
         "objects": "#3d6f9f",
         "products": "#6c7a2f",
         "calendar": "#8a4b6f",
+        "databases": "#4f6475",
     }
     pixmap = QPixmap(24, 24)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -1803,6 +2073,10 @@ def _directory_icon(key: str) -> QIcon:
     elif key == "pay_rates":
         painter.drawEllipse(6, 5, 12, 12)
         painter.drawLine(12, 8, 12, 15)
+    elif key == "databases":
+        painter.drawEllipse(6, 5, 12, 5)
+        painter.drawRect(6, 7, 12, 9)
+        painter.drawArc(6, 13, 12, 5, 0, -180 * 16)
         painter.drawLine(9, 10, 15, 10)
     elif key == "objects":
         painter.drawRect(6, 6, 12, 12)

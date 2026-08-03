@@ -1,5 +1,31 @@
 ﻿# Changelog
 
+## 2026-08-03 - Database registry and manual MAX identity
+
+### Added
+
+- Added the `Базы данных` directory with a JSON registry for ProLOG and WorkBot
+  SQLite files, availability checks and selection of existing network paths.
+- Added a clear startup error when the selected ProLOG database is unavailable,
+  preventing accidental creation of an empty database at a mistyped path.
+
+### Changed
+
+- Reordered the main tabs to reports, incoming WorkBot reports, report viewer
+  and analytics; compacted the incoming-report workspace.
+- Simplified MAX identity to an administrator-confirmed `MAX ID → Employees.id`
+  binding. Phone confirmation and phone-based automatic matching are disabled.
+- Replaced the unsupported numeric-user web route with reliable MAX ID copying;
+  MAX does not publish a browser deeplink for arbitrary user IDs.
+- Existing incoming rows are rematched immediately after binding, including
+  historical WorkBot rows, without duplicate revisions.
+- Updated and centered the login greeting; Enter now submits the login form.
+- Bumped the application and Windows executable version to `0.4.0`.
+
+### Verified
+
+- All project tests pass: `23 passed`.
+
 ## 2026-08-03 - Open MAX users in the browser
 
 ### Fixed

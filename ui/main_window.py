@@ -25,6 +25,7 @@ from auth import AuthService, AuthSession, role_label
 from config import ConfigManager
 from constants import APP_ICON_FILE, APP_NAME
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
+from database_registry import DatabaseRegistry
 from legacy_import.service import LegacyExcelImportService
 from integrations.workbot.repository import WorkBotRepository
 from integrations.workbot.service import WorkBotIntegrationService
@@ -134,9 +135,9 @@ class MainWindow(QMainWindow):
         self.splitter.setSizes(self._initial_splitter_sizes())
         self.tabs = QTabWidget()
         self.tabs.addTab(self.splitter, "Заполнение отчетов")
+        self.tabs.addTab(self.workbot_inbox, "Входящие отчеты")
         self.tabs.addTab(self.report_viewer, "Просмотр отчетов")
         self.tabs.addTab(self.analytics_widget, "Аналитика")
-        self.tabs.addTab(self.workbot_inbox, "Входящие отчеты")
         self.setCentralWidget(self.tabs)
 
     def _initial_splitter_sizes(self) -> list[int]:
@@ -416,8 +417,14 @@ class MainWindow(QMainWindow):
             self.directories,
             self,
             can_edit_pay_rates=role_can_access(self.auth_session.role, MODULE_PAYROLL),
+            can_edit_databases=self.auth_session.is_admin,
+            database_registry=DatabaseRegistry(),
+            config_manager=self.config_manager,
+            app_settings=self.config,
+            current_database_path=self.database.path,
         )
         dialog.exec()
+        self.workbot_inbox.set_source_path(self.config.workbot_database_path)
         self.refresh_directories()
         self.refresh_analytics()
         self.statusBar().showMessage("Справочники обновлены", 5000)
@@ -431,6 +438,11 @@ class MainWindow(QMainWindow):
             self,
             initial_key="objects",
             can_edit_pay_rates=role_can_access(self.auth_session.role, MODULE_PAYROLL),
+            can_edit_databases=self.auth_session.is_admin,
+            database_registry=DatabaseRegistry(),
+            config_manager=self.config_manager,
+            app_settings=self.config,
+            current_database_path=self.database.path,
         )
         dialog.exec()
         objects = self.directories.list_all("objects")

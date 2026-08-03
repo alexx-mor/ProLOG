@@ -108,8 +108,6 @@ class WorkBotSourceUser:
     last_name: str = ""
     username: str = ""
     employee_text: str = ""
-    verified_phone: str = ""
-    phone_verified_at: str = ""
 
     @property
     def profile_name(self) -> str:
@@ -125,8 +123,6 @@ class WorkBotUserLink:
     employee_text: str = ""
     employee_id: int | None = None
     employee_name: str = ""
-    mobile_phone: str = ""
-    verified_phone: str = ""
     binding_saved: bool = False
     match_source: str = "none"
     match_message: str = ""

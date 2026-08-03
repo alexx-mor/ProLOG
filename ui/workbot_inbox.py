@@ -164,11 +164,8 @@ class WorkBotInboxWidget(QWidget):
         splitter.setSizes([760, 500])
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
-        title = QLabel("Входящие отчеты WorkBot")
-        title.setObjectName("SectionTitle")
-        layout.addWidget(title)
         layout.addLayout(source_row)
         layout.addWidget(splitter)
 

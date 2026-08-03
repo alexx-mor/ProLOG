@@ -145,3 +145,4 @@ class AppSettings:
     initial_setup_done: bool = False
     monthly_hours_norm: int = 168
     workbot_database_path: str = ""
+    prolog_database_path: str = ""

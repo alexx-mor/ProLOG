@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import tempfile
 import unittest
 from datetime import date, datetime
@@ -163,27 +161,6 @@ class ServiceTests(unittest.TestCase):
         self.service.handle_update(_update(1, "/stats", chat_id=None, mid="owner-1"))
         self.assertIn("Принято отчётов", self.client.messages[0][1])
 
-    def test_user_can_request_verified_contact(self):
-        self.service.handle_update(_update(10, "/register", chat_id=None, mid="register-1"))
-        attachments = self.client.last_message_kwargs["attachments"]
-        button = attachments[0]["payload"]["buttons"][0][0]
-        self.assertEqual(button["type"], "request_contact")
-
-    def test_signed_max_contact_is_saved(self):
-        vcard = "BEGIN:VCARD\r\nTEL;TYPE=CELL:+7 (999) 123-45-67\r\nEND:VCARD"
-        signature = hmac.new(b"test", vcard.encode(), hashlib.sha256).hexdigest()
-        self.service.handle_update(_contact_update(10, vcard, signature))
-        user = next(row for row in self.storage.users() if row["max_user_id"] == 10)
-        self.assertEqual(user["verified_phone"], "+79991234567")
-        self.assertIn("подтвержден", self.client.messages[-1][1])
-
-    def test_unverified_contact_is_rejected(self):
-        vcard = "BEGIN:VCARD\r\nTEL:+7 999 123-45-67\r\nEND:VCARD"
-        self.service.handle_update(_contact_update(10, vcard, "wrong"))
-        user = next(row for row in self.storage.users() if row["max_user_id"] == 10)
-        self.assertEqual(user["verified_phone"], "")
-        self.assertIn("не удалось подтвердить", self.client.messages[0][1])
-
     def test_owner_can_open_inline_menu(self):
         self.service.handle_update(_update(1, "/menu", chat_id=None, mid="menu-1"))
         attachments = self.client.last_message_kwargs["attachments"]
@@ -252,21 +229,6 @@ def _callback_update(sender_id: int, payload: str):
             },
         },
     }
-
-
-def _contact_update(sender_id: int, vcf_info: str, signature: str):
-    update = _update(sender_id, "", chat_id=None, mid="contact-1")
-    update["message"]["body"]["attachments"] = [
-        {
-            "type": "contact",
-            "payload": {
-                "vcf_info": vcf_info,
-                "hash": signature,
-                "max_info": {"user_id": sender_id},
-            },
-        }
-    ]
-    return update
 
 
 if __name__ == "__main__":

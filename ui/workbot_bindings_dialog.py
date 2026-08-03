@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QLineEdit,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -25,9 +24,6 @@ from integrations.workbot.service import WorkBotIntegrationService
 from models import Employee
 
 
-MAX_WEB_USER_URL = "https://web.max.ru/:push?userId={user_id}"
-
-
 class WorkBotBindingsDialog(QDialog):
     def __init__(
         self,
@@ -38,21 +34,18 @@ class WorkBotBindingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Привязки пользователей WorkBot")
-        self.resize(1440, 640)
+        self.resize(1120, 640)
         self.service = service
         self.employees = sorted(employees, key=lambda item: item.full_name.casefold())
         self.links = service.list_user_links(source_path)
-        self.table = QTableWidget(len(self.links), 8)
+        self.table = QTableWidget(len(self.links), 5)
         self.table.setHorizontalHeaderLabels(
             [
                 "MAX ID",
                 "Профиль MAX",
-                "ФИО в WorkBot",
-                "Подтвержденный телефон MAX",
                 "Сотрудник ProLOG",
-                "Телефон сотрудника",
                 "Состояние",
-                "MAX",
+                "Действие",
             ]
         )
         self.save_button = QPushButton("Сохранить привязки")
@@ -66,9 +59,9 @@ class WorkBotBindingsDialog(QDialog):
         title = QLabel("Привязка пользователей MAX к сотрудникам")
         title.setObjectName("DialogTitle")
         note = QLabel(
-            "Для надежной привязки сотрудник должен написать WorkBot команду /register и нажать "
-            "кнопку передачи контакта. ProLOG автоматически сопоставляет только подтвержденный MAX "
-            "номер, который встречается ровно в одной карточке сотрудника."
+            "Проверьте профиль MAX и выберите соответствующего сотрудника ProLOG. Публичная "
+            "ссылка на пользователя по числовому ID в MAX отсутствует; кнопка копирует точный ID. "
+            "Зеленые строки уже привязаны, красные требуют проверки."
         )
         note.setWordWrap(True)
         buttons = QHBoxLayout()
@@ -89,75 +82,64 @@ class WorkBotBindingsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for column, width in enumerate((105, 175, 180, 205, 245, 165, 210, 105)):
+        for column, width in enumerate((120, 230, 330, 210, 145)):
             self.table.setColumnWidth(column, width)
         for row_index, link in enumerate(self.links):
             self.table.setItem(row_index, 0, QTableWidgetItem(str(link.max_user_id)))
             self.table.setItem(row_index, 1, QTableWidgetItem(link.profile_name))
-            self.table.setItem(row_index, 2, QTableWidgetItem(link.employee_text))
-            verified_phone = QTableWidgetItem(link.verified_phone or "Не подтвержден")
-            verified_phone.setToolTip(
-                "Номер подтвержден подписью MAX" if link.verified_phone else "Пользователь еще не выполнил /register"
-            )
-            self.table.setItem(row_index, 3, verified_phone)
             employee_combo = QComboBox()
             employee_combo.addItem("Не привязан", None)
             for employee in self.employees:
                 employee_combo.addItem(employee.full_name, employee.id)
             employee_combo.setCurrentIndex(max(0, employee_combo.findData(link.employee_id)))
-            phone = QLineEdit(link.mobile_phone)
-            phone.setPlaceholderText("+7 999 123-45-67")
-            self.table.setCellWidget(row_index, 4, employee_combo)
-            self.table.setCellWidget(row_index, 5, phone)
+            self.table.setCellWidget(row_index, 2, employee_combo)
             state = QTableWidgetItem(link.match_message)
             state.setToolTip(link.match_message)
-            self.table.setItem(row_index, 6, state)
-            open_button = QPushButton("Открыть")
-            open_button.setToolTip("Открыть профиль или диалог в веб-версии MAX")
+            self.table.setItem(row_index, 3, state)
+            open_button = QPushButton("Копировать ID")
+            open_button.setToolTip("Скопировать числовой MAX ID")
             open_button.clicked.connect(
-                lambda _checked=False, user_id=link.max_user_id: self._open_max_user(user_id)
+                lambda _checked=False, user_id=link.max_user_id: self._copy_max_id(user_id)
             )
-            self.table.setCellWidget(row_index, 7, open_button)
+            self.table.setCellWidget(row_index, 4, open_button)
             employee_combo.currentIndexChanged.connect(
                 lambda _index, row=row_index: self._employee_changed(row)
             )
+            self._paint_row(row_index, employee_combo.currentData() is not None)
 
-    def _open_max_user(self, user_id: int) -> None:
-        url = QUrl(MAX_WEB_USER_URL.format(user_id=user_id))
-        if QDesktopServices.openUrl(url):
-            return
-        self._message(
-            "Не удалось открыть веб-версию MAX. Проверьте браузер по умолчанию "
-            "и подключение к интернету.",
-            QMessageBox.Icon.Warning,
-        )
+    def _copy_max_id(self, user_id: int) -> None:
+        QApplication.clipboard().setText(str(user_id))
 
     def _employee_changed(self, row_index: int) -> None:
-        employee_combo = self.table.cellWidget(row_index, 4)
-        phone = self.table.cellWidget(row_index, 5)
+        employee_combo = self.table.cellWidget(row_index, 2)
         employee_id = employee_combo.currentData()
         employee = next((item for item in self.employees if item.id == employee_id), None)
-        employee_phone = employee.mobile_phone if employee else ""
-        if employee and not employee_phone and self.links[row_index].verified_phone:
-            employee_phone = self.links[row_index].verified_phone
-        phone.setText(employee_phone)
-        state = self.table.item(row_index, 6)
+        state = self.table.item(row_index, 3)
         if state:
             state.setText("Будет привязан" if employee else "Не привязан")
+        self._paint_row(row_index, employee is not None)
+
+    def _paint_row(self, row_index: int, is_bound: bool) -> None:
+        color = QColor("#dff3e4" if is_bound else "#fde8e7")
+        for column in range(self.table.columnCount()):
+            item = self.table.item(row_index, column)
+            if item is not None:
+                item.setBackground(color)
+        employee_combo = self.table.cellWidget(row_index, 2)
+        if employee_combo is not None:
+            employee_combo.setStyleSheet(
+                "QComboBox { background-color: %s; }" % color.name()
+            )
 
     def _save(self) -> None:
         updated: list[WorkBotUserLink] = []
         for row_index, link in enumerate(self.links):
-            employee_combo = self.table.cellWidget(row_index, 4)
-            phone = self.table.cellWidget(row_index, 5)
+            employee_combo = self.table.cellWidget(row_index, 2)
             updated.append(
                 WorkBotUserLink(
                     max_user_id=link.max_user_id,
                     profile_name=link.profile_name,
-                    employee_text=link.employee_text,
                     employee_id=employee_combo.currentData(),
-                    mobile_phone=phone.text(),
-                    verified_phone=link.verified_phone,
                 )
             )
         try:

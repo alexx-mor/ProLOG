@@ -10,7 +10,7 @@ import pytest
 
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from hours import format_hours, normalize_hours, parse_hours
-from integrations.workbot.models import STATUS_CHANGED, STATUS_READY
+from integrations.workbot.models import STATUS_CHANGED, STATUS_NEEDS_EMPLOYEE, STATUS_READY
 from integrations.workbot.models import WorkBotUserLink
 from integrations.workbot.matcher import detect_product
 from integrations.workbot.repository import WorkBotRepository
@@ -101,10 +101,16 @@ def test_workbot_sync_is_idempotent_and_preserves_revisions(tmp_path: Path) -> N
 def test_max_user_can_be_bound_before_report_sync(tmp_path: Path) -> None:
     source_path = tmp_path / "workbot.sqlite3"
     _create_workbot_source(source_path)
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("UPDATE users SET employee_name = 'Василий' WHERE max_user_id = 100")
+        connection.execute("UPDATE reports SET employee_name = 'Василий' WHERE sender_id = 100")
     service, _worklogs, employee_id, *_rest = _create_prolog(tmp_path)
+    first = service.sync(source_path)
+    assert first.added_rows == 1
+    assert service.list_rows()[0].status == STATUS_NEEDS_EMPLOYEE
     links = service.list_user_links(source_path)
     assert len(links) == 1
-    assert links[0].employee_id == employee_id
+    assert links[0].employee_id is None
     assert not links[0].binding_saved
     service.save_user_links(
         [
@@ -112,17 +118,19 @@ def test_max_user_can_be_bound_before_report_sync(tmp_path: Path) -> None:
                 max_user_id=links[0].max_user_id,
                 profile_name=links[0].profile_name,
                 employee_id=employee_id,
-                mobile_phone="+7 999 123-45-67",
             )
         ]
     )
+    rematched = service.sync(source_path)
     saved = service.list_user_links(source_path)[0]
     assert saved.employee_id == employee_id
     assert saved.binding_saved
-    assert saved.mobile_phone == "+79991234567"
+    assert rematched.added_rows == 0
+    assert rematched.unchanged_messages == 1
+    assert service.list_rows()[0].status == STATUS_READY
 
 
-def test_verified_phone_is_bound_automatically_before_matching_reports(tmp_path: Path) -> None:
+def test_verified_phone_is_not_used_for_automatic_binding(tmp_path: Path) -> None:
     source_path = tmp_path / "workbot.sqlite3"
     _create_workbot_source(source_path)
     with sqlite3.connect(source_path) as connection:
@@ -148,11 +156,11 @@ def test_verified_phone_is_bound_automatically_before_matching_reports(tmp_path:
     result = service.sync(source_path)
 
     assert result.added_rows == 1
-    assert service.repository.employee_binding(100) == employee_id
+    assert service.repository.employee_binding(100) is None
     link = service.list_user_links(source_path)[0]
-    assert link.binding_saved
-    assert link.verified_phone == "+79991234567"
-    assert service.list_rows()[0].status == STATUS_READY
+    assert not link.binding_saved
+    assert link.employee_id is None
+    assert service.list_rows()[0].status == STATUS_NEEDS_EMPLOYEE
 
 
 def _create_prolog(tmp_path: Path):

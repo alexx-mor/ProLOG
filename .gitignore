@@ -4,6 +4,7 @@ __pycache__/
 .venv-win/
 build/
 dist/
+dist_release/
 backups/
 config.json
 data/*.sqlite3

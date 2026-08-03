@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -60,8 +59,6 @@ class WorkBotService:
         is_private = chat_type == "dialog" or chat_id is None
         is_owner = sender_id in self.config.owner_ids
 
-        if is_private and isinstance(body, dict) and self._handle_contact(sender_id, body):
-            return
         if not text:
             return
 
@@ -69,11 +66,7 @@ class WorkBotService:
             if historical:
                 return
             command = text.partition(" ")[0].split("@", 1)[0].casefold()
-            if is_private and command in {"/register", "/phone"}:
-                self._request_verified_contact(sender_id)
-            elif is_private and command == "/start" and not is_owner:
-                self._request_verified_contact(sender_id)
-            elif is_owner:
+            if is_owner:
                 self._handle_owner_command(sender_id, text)
             elif is_private and self.config.deny_unauthorized:
                 self.client.send_message("Доступ запрещён.", user_id=sender_id)
@@ -119,72 +112,6 @@ class WorkBotService:
             return
 
         self.storage.save_report(message_id, sender_id, employee_name, parsed)
-
-    def _request_verified_contact(self, user_id: int) -> None:
-        self.client.send_message(
-            "Подтвердите номер телефона, который привязан к вашему аккаунту MAX. "
-            "Он нужен только для точного сопоставления с карточкой сотрудника в ProLOG.",
-            user_id=user_id,
-            attachments=[
-                {
-                    "type": "inline_keyboard",
-                    "payload": {
-                        "buttons": [
-                            [
-                                {
-                                    "type": "request_contact",
-                                    "text": "Поделиться подтвержденным номером",
-                                }
-                            ]
-                        ]
-                    },
-                }
-            ],
-        )
-
-    def _handle_contact(self, user_id: int, body: dict[str, Any]) -> bool:
-        attachment = _contact_attachment(body)
-        if attachment is None:
-            return False
-        payload = attachment.get("payload") or {}
-        if not isinstance(payload, dict):
-            self._reject_contact(user_id)
-            return True
-        vcf_info = str(payload.get("vcf_info") or "")
-        signature = str(payload.get("hash") or "").strip().casefold()
-        if not vcf_info or not signature or not _valid_contact_hash(
-            self.config.token,
-            vcf_info,
-            signature,
-        ):
-            self._reject_contact(user_id)
-            return True
-        contact_user_id = _contact_user_id(payload.get("max_info"))
-        if contact_user_id is not None and contact_user_id != user_id:
-            self._reject_contact(user_id)
-            return True
-        phone = _phone_from_vcard(vcf_info)
-        if not phone:
-            self._reject_contact(user_id)
-            return True
-        try:
-            self.storage.save_verified_phone(user_id, phone)
-        except ValueError as exc:
-            self.client.send_message(str(exc), user_id=user_id)
-            return True
-        self.client.send_message(
-            f"Номер {phone} подтвержден. ProLOG автоматически сопоставит его с карточкой сотрудника.",
-            user_id=user_id,
-        )
-        return True
-
-    def _reject_contact(self, user_id: int) -> None:
-        self.client.send_message(
-            "Контакт не удалось подтвердить. Используйте кнопку WorkBot: "
-            "пересланные контакты и номера, введенные вручную, не принимаются.",
-            user_id=user_id,
-        )
-        self._request_verified_contact(user_id)
 
     def _handle_owner_command(self, owner_id: int, text: str) -> None:
         command, _, arguments = text.partition(" ")
@@ -405,55 +332,6 @@ def _as_int(value: object) -> int | None:
         return None
 
 
-def _contact_attachment(body: dict[str, Any]) -> dict[str, Any] | None:
-    attachments = body.get("attachments") or []
-    if not isinstance(attachments, list):
-        return None
-    return next(
-        (
-            attachment
-            for attachment in attachments
-            if isinstance(attachment, dict)
-            and str(attachment.get("type") or "").casefold() == "contact"
-        ),
-        None,
-    )
-
-
-def _valid_contact_hash(token: str, vcf_info: str, signature: str) -> bool:
-    variants = [vcf_info]
-    decoded_line_breaks = vcf_info.replace("\\r\\n", "\r\n")
-    if decoded_line_breaks != vcf_info:
-        variants.append(decoded_line_breaks)
-    return any(
-        hmac.compare_digest(
-            hmac.new(token.encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest(),
-            signature,
-        )
-        for value in variants
-    )
-
-
-def _phone_from_vcard(vcf_info: str) -> str:
-    match = re.search(r"^TEL(?:;[^:]*)?:(.+)$", vcf_info, flags=re.IGNORECASE | re.MULTILINE)
-    if not match:
-        return ""
-    digits = re.sub(r"\D", "", match.group(1))
-    if len(digits) == 11 and digits.startswith("8"):
-        digits = "7" + digits[1:]
-    elif len(digits) == 10:
-        digits = "7" + digits
-    if not 7 <= len(digits) <= 15:
-        return ""
-    return f"+{digits}"
-
-
-def _contact_user_id(max_info: object) -> int | None:
-    if not isinstance(max_info, dict):
-        return None
-    return _as_int(max_info.get("user_id") or max_info.get("id"))
-
-
 def _parse_period(arguments: str) -> tuple[date | None, date | None]:
     if not arguments:
         return None, None
@@ -493,7 +371,6 @@ _TEMPLATE = """Дата: 30.07.2026
 
 _HELP = """WorkBot — команды владельца:
 /menu — кнопки управления
-/register — подтвердить номер MAX для автоматической привязки к ProLOG
 /template — шаблон отчёта
 /users — найденные пользователи и их MAX ID
 /chats — обнаруженные группы и их chat_id
