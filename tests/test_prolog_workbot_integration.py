@@ -122,13 +122,53 @@ def test_max_user_can_be_bound_before_report_sync(tmp_path: Path) -> None:
     assert saved.mobile_phone == "+79991234567"
 
 
+def test_verified_phone_is_bound_automatically_before_matching_reports(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    with sqlite3.connect(source_path) as connection:
+        connection.execute(
+            "ALTER TABLE users ADD COLUMN verified_phone TEXT NOT NULL DEFAULT ''"
+        )
+        connection.execute(
+            "ALTER TABLE users ADD COLUMN phone_verified_at TEXT NOT NULL DEFAULT ''"
+        )
+        connection.execute(
+            """
+            UPDATE users
+            SET employee_name = 'Василий', verified_phone = '+79991234567',
+                phone_verified_at = '2026-08-03T10:00:00'
+            WHERE max_user_id = 100
+            """
+        )
+        connection.execute(
+            "UPDATE reports SET employee_name = 'Василий' WHERE sender_id = 100"
+        )
+    service, _worklogs, employee_id, *_rest = _create_prolog(tmp_path)
+
+    result = service.sync(source_path)
+
+    assert result.added_rows == 1
+    assert service.repository.employee_binding(100) == employee_id
+    link = service.list_user_links(source_path)[0]
+    assert link.binding_saved
+    assert link.verified_phone == "+79991234567"
+    assert service.list_rows()[0].status == STATUS_READY
+
+
 def _create_prolog(tmp_path: Path):
     database = Database(tmp_path / "prolog.sqlite3")
     database.initialize()
     directories = DirectoryService(DirectoryRepository(database))
     employees = EmployeeService(EmployeeRepository(database), directories)
     worklogs = WorkLogService(WorkLogRepository(database), directories)
-    employee_id = employees.save(Employee("Иванов Иван Иванович", "Слесарь", "1"))
+    employee_id = employees.save(
+        Employee(
+            "Иванов Иван Иванович",
+            "Слесарь",
+            "1",
+            mobile_phone="+7 999 123-45-67",
+        )
+    )
     location_id = directories.ensure("locations", "Производство")
     object_id = directories.ensure("objects", "Жигалово")
     work_type_id = directories.ensure("work_types", "Монтаж")

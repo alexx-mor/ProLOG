@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-win/
 build/
 dist/
 backups/
@@ -8,6 +9,8 @@ config.json
 data/*.sqlite3
 data/*.log
 data/*.json
+data/*.out
+data/*.err
 exports/*.xlsx
 private/
 /*.xlsx

@@ -33,13 +33,21 @@ class WorkBotBindingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Привязки пользователей WorkBot")
-        self.resize(1040, 620)
+        self.resize(1320, 640)
         self.service = service
         self.employees = sorted(employees, key=lambda item: item.full_name.casefold())
         self.links = service.list_user_links(source_path)
-        self.table = QTableWidget(len(self.links), 6)
+        self.table = QTableWidget(len(self.links), 7)
         self.table.setHorizontalHeaderLabels(
-            ["MAX ID", "Профиль MAX", "ФИО в WorkBot", "Сотрудник ProLOG", "Мобильный телефон", "Состояние"]
+            [
+                "MAX ID",
+                "Профиль MAX",
+                "ФИО в WorkBot",
+                "Подтвержденный телефон MAX",
+                "Сотрудник ProLOG",
+                "Телефон сотрудника",
+                "Состояние",
+            ]
         )
         self.save_button = QPushButton("Сохранить привязки")
         self.close_button = QPushButton("Закрыть")
@@ -52,8 +60,9 @@ class WorkBotBindingsDialog(QDialog):
         title = QLabel("Привязка пользователей MAX к сотрудникам")
         title.setObjectName("DialogTitle")
         note = QLabel(
-            "Телефон хранится в карточке сотрудника ProLOG. MAX API не передает номер телефона, "
-            "поэтому его необходимо указать вручную или импортировать вместе со списком сотрудников."
+            "Для надежной привязки сотрудник должен написать WorkBot команду /register и нажать "
+            "кнопку передачи контакта. ProLOG автоматически сопоставляет только подтвержденный MAX "
+            "номер, который встречается ровно в одной карточке сотрудника."
         )
         note.setWordWrap(True)
         buttons = QHBoxLayout()
@@ -74,12 +83,17 @@ class WorkBotBindingsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for column, width in enumerate((125, 190, 190, 260, 165, 120)):
+        for column, width in enumerate((105, 175, 180, 205, 245, 165, 220)):
             self.table.setColumnWidth(column, width)
         for row_index, link in enumerate(self.links):
             self.table.setItem(row_index, 0, QTableWidgetItem(str(link.max_user_id)))
             self.table.setItem(row_index, 1, QTableWidgetItem(link.profile_name))
             self.table.setItem(row_index, 2, QTableWidgetItem(link.employee_text))
+            verified_phone = QTableWidgetItem(link.verified_phone or "Не подтвержден")
+            verified_phone.setToolTip(
+                "Номер подтвержден подписью MAX" if link.verified_phone else "Пользователь еще не выполнил /register"
+            )
+            self.table.setItem(row_index, 3, verified_phone)
             employee_combo = QComboBox()
             employee_combo.addItem("Не привязан", None)
             for employee in self.employees:
@@ -87,29 +101,33 @@ class WorkBotBindingsDialog(QDialog):
             employee_combo.setCurrentIndex(max(0, employee_combo.findData(link.employee_id)))
             phone = QLineEdit(link.mobile_phone)
             phone.setPlaceholderText("+7 999 123-45-67")
-            self.table.setCellWidget(row_index, 3, employee_combo)
-            self.table.setCellWidget(row_index, 4, phone)
-            state = "Привязан" if link.binding_saved else ("Предложено" if link.employee_id else "Не привязан")
-            self.table.setItem(row_index, 5, QTableWidgetItem(state))
+            self.table.setCellWidget(row_index, 4, employee_combo)
+            self.table.setCellWidget(row_index, 5, phone)
+            state = QTableWidgetItem(link.match_message)
+            state.setToolTip(link.match_message)
+            self.table.setItem(row_index, 6, state)
             employee_combo.currentIndexChanged.connect(
                 lambda _index, row=row_index: self._employee_changed(row)
             )
 
     def _employee_changed(self, row_index: int) -> None:
-        employee_combo = self.table.cellWidget(row_index, 3)
-        phone = self.table.cellWidget(row_index, 4)
+        employee_combo = self.table.cellWidget(row_index, 4)
+        phone = self.table.cellWidget(row_index, 5)
         employee_id = employee_combo.currentData()
         employee = next((item for item in self.employees if item.id == employee_id), None)
-        phone.setText(employee.mobile_phone if employee else "")
-        state = self.table.item(row_index, 5)
+        employee_phone = employee.mobile_phone if employee else ""
+        if employee and not employee_phone and self.links[row_index].verified_phone:
+            employee_phone = self.links[row_index].verified_phone
+        phone.setText(employee_phone)
+        state = self.table.item(row_index, 6)
         if state:
             state.setText("Будет привязан" if employee else "Не привязан")
 
     def _save(self) -> None:
         updated: list[WorkBotUserLink] = []
         for row_index, link in enumerate(self.links):
-            employee_combo = self.table.cellWidget(row_index, 3)
-            phone = self.table.cellWidget(row_index, 4)
+            employee_combo = self.table.cellWidget(row_index, 4)
+            phone = self.table.cellWidget(row_index, 5)
             updated.append(
                 WorkBotUserLink(
                     max_user_id=link.max_user_id,
@@ -117,6 +135,7 @@ class WorkBotBindingsDialog(QDialog):
                     employee_text=link.employee_text,
                     employee_id=employee_combo.currentData(),
                     mobile_phone=phone.text(),
+                    verified_phone=link.verified_phone,
                 )
             )
         try:

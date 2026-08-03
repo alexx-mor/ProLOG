@@ -17,13 +17,20 @@ from integrations.workbot.models import (
     STATUS_SOURCE_ERROR,
     WorkBotCandidate,
     WorkBotInboxRow,
+    WorkBotSourceUser,
     WorkBotSyncResult,
     WorkBotUserLink,
 )
 from integrations.workbot.repository import WorkBotRepository, normalize_alias
 from integrations.workbot.source import WorkBotSource
 from models import DirectoryItem, Employee, ProductItem, WorkLogEntry
-from services import DirectoryService, EmployeeService, NON_WORK_LOCATIONS, WorkLogService
+from services import (
+    DirectoryService,
+    EmployeeService,
+    NON_WORK_LOCATIONS,
+    WorkLogService,
+    normalize_mobile_phone,
+)
 
 
 class WorkBotIntegrationService:
@@ -43,6 +50,8 @@ class WorkBotIntegrationService:
     def sync(self, source_path: Path) -> WorkBotSyncResult:
         candidates = self.source.read_candidates(source_path)
         employees = self.employees.list()
+        users = self.source.read_users(source_path)
+        self._sync_verified_bindings(users, employees)
         objects = self.directories.list_all("objects")
         locations = self.directories.list_all("locations")
         work_types = self.directories.list_all("work_types")
@@ -63,6 +72,8 @@ class WorkBotIntegrationService:
         users = self.source.read_users(source_path)
         bindings = self.repository.employee_bindings()
         employees = {employee.id: employee for employee in self.employees.list() if employee.id is not None}
+        employee_phones = _employees_by_phone(employees.values())
+        employee_owners = {employee_id: max_user_id for max_user_id, employee_id in bindings.items()}
         employees_by_name = {
             normalize_alias(employee.full_name): employee
             for employee in employees.values()
@@ -72,9 +83,34 @@ class WorkBotIntegrationService:
             employee_id = bindings.get(user.max_user_id)
             employee = employees.get(employee_id)
             binding_saved = employee is not None
-            if employee is None and user.employee_text:
+            match_source = "saved" if binding_saved else "none"
+            match_message = "Привязка сохранена" if binding_saved else ""
+            verified_phone = _safe_phone(user.verified_phone)
+            if employee is None and verified_phone:
+                matches = employee_phones.get(verified_phone, [])
+                if len(matches) == 1:
+                    proposed = matches[0]
+                    owner = employee_owners.get(proposed.id)
+                    if owner is None or owner == user.max_user_id:
+                        employee = proposed
+                        employee_id = proposed.id
+                        match_source = "verified_phone"
+                        match_message = "Найден по подтвержденному телефону"
+                    else:
+                        match_source = "conflict"
+                        match_message = "Сотрудник уже привязан к другому MAX ID"
+                elif len(matches) > 1:
+                    match_source = "conflict"
+                    match_message = "Телефон указан у нескольких сотрудников"
+                else:
+                    match_source = "phone_missing"
+                    match_message = "Подтвержденный телефон не найден у сотрудников"
+            if employee is None and user.employee_text and match_source == "none":
                 employee = employees_by_name.get(normalize_alias(user.employee_text))
                 employee_id = employee.id if employee else None
+                if employee:
+                    match_source = "name"
+                    match_message = "Предложено по ФИО; требуется проверка"
             result.append(
                 WorkBotUserLink(
                     max_user_id=user.max_user_id,
@@ -83,10 +119,39 @@ class WorkBotIntegrationService:
                     employee_id=employee_id if employee else None,
                     employee_name=employee.full_name if employee else "",
                     mobile_phone=employee.mobile_phone if employee else "",
+                    verified_phone=verified_phone,
                     binding_saved=binding_saved,
+                    match_source=match_source,
+                    match_message=match_message or "Не сопоставлен",
                 )
             )
         return result
+
+    def _sync_verified_bindings(
+        self,
+        users: list[WorkBotSourceUser],
+        employees: list[Employee],
+    ) -> None:
+        bindings = self.repository.employee_bindings()
+        employee_owners = {employee_id: max_user_id for max_user_id, employee_id in bindings.items()}
+        employee_phones = _employees_by_phone(employees)
+        for user in users:
+            if user.max_user_id in bindings:
+                continue
+            phone = _safe_phone(user.verified_phone)
+            matches = employee_phones.get(phone, []) if phone else []
+            if len(matches) != 1:
+                continue
+            employee = matches[0]
+            if employee.id is None or employee.id in employee_owners:
+                continue
+            self.repository.save_employee_binding(
+                user.max_user_id,
+                employee.id,
+                user.profile_name,
+            )
+            bindings[user.max_user_id] = employee.id
+            employee_owners[employee.id] = user.max_user_id
 
     def save_user_links(self, links: list[WorkBotUserLink]) -> None:
         selected = [link.employee_id for link in links if link.employee_id is not None]
@@ -253,3 +318,19 @@ def _exact_id(value: str, items, name_attr: str = "name") -> int | None:
 
 def _by_id(items, item_id: int | None):
     return next((item for item in items if item.id == item_id), None)
+
+
+def _employees_by_phone(employees) -> dict[str, list[Employee]]:
+    result: dict[str, list[Employee]] = {}
+    for employee in employees:
+        phone = _safe_phone(employee.mobile_phone)
+        if phone:
+            result.setdefault(phone, []).append(employee)
+    return result
+
+
+def _safe_phone(value: str) -> str:
+    try:
+        return normalize_mobile_phone(value)
+    except ValueError:
+        return ""

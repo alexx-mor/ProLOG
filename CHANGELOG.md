@@ -1,5 +1,27 @@
 ﻿# Changelog
 
+## 2026-08-03 - Verified MAX identity
+
+### Added
+
+- Added self-registration through the native MAX contact-request button.
+- WorkBot verifies the contact HMAC before storing the phone bound to the sender's MAX account.
+- ProLOG automatically binds a MAX ID when its verified phone uniquely matches an employee card.
+- The binding registry now shows the verified MAX phone separately from the editable employee phone and explains conflicts.
+
+### Safety
+
+- Forwarded contacts and manually entered numbers cannot create a verified identity.
+- Existing manual bindings are never overwritten automatically.
+- Duplicate employee phones and already occupied employee bindings require manual review.
+- Existing WorkBot databases are migrated in place without deleting users, messages or reports.
+
+### Verified
+
+- All project tests pass: `22 passed`.
+- Covered valid and forged contact signatures, old database compatibility and automatic matching when the MAX profile name is unreliable.
+- Bumped the application and Windows executable version to `0.3.1`.
+
 ## 2026-08-03 - MAX identity registry and product recognition
 
 ### Added

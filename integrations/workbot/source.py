@@ -37,9 +37,17 @@ class WorkBotSource:
         connection = self._connect(path)
         try:
             self._validate_schema(connection)
+            columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(users)")
+            }
+            verified_phone = "verified_phone" if "verified_phone" in columns else "''"
+            verified_at = "phone_verified_at" if "phone_verified_at" in columns else "''"
             rows = connection.execute(
-                """
-                SELECT max_user_id, first_name, last_name, username, employee_name
+                f"""
+                SELECT max_user_id, first_name, last_name, username, employee_name,
+                       {verified_phone} AS verified_phone,
+                       {verified_at} AS phone_verified_at
                 FROM users
                 ORDER BY COALESCE(NULLIF(employee_name, ''), last_name, first_name), max_user_id
                 """
@@ -55,6 +63,8 @@ class WorkBotSource:
                 last_name=str(row["last_name"] or "").strip(),
                 username=str(row["username"] or "").strip(),
                 employee_text=str(row["employee_name"] or "").strip(),
+                verified_phone=str(row["verified_phone"] or "").strip(),
+                phone_verified_at=str(row["phone_verified_at"] or "").strip(),
             )
             for row in rows
         ]
