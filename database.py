@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime
@@ -16,7 +17,13 @@ from category_rules import (
     normalize_pay_category,
     pay_categories_for_position,
 )
-from constants import DATABASE_FILE
+from constants import (
+    ALIASES_DATABASE_FILE,
+    DATABASE_FILE,
+    EMPLOYEES_DATABASE_FILE,
+    OBJECTS_DATABASE_FILE,
+    PRODUCTS_DATABASE_FILE,
+)
 from directory_files import (
     department_names_match,
     load_directory_seeds,
@@ -26,6 +33,7 @@ from directory_files import (
     load_positions,
 )
 from models import (
+    AliasItem,
     DirectoryItem,
     Employee,
     ObjectStatus,
@@ -40,24 +48,63 @@ from models import (
 logger = logging.getLogger(__name__)
 
 DIRECTORY_TABLES = {
-    "objects": "Objects",
+    "objects": "objects_db.Objects",
     "employee_groups": "EmployeeGroups",
     "positions": "Positions",
     "work_types": "WorkTypes",
     "locations": "Locations",
 }
 
+EMPLOYEES_TABLE = "employees_db.Employees"
+OBJECTS_TABLE = "objects_db.Objects"
+PRODUCTS_TABLE = "products_db.Products"
+ALIASES_SCHEMA = "aliases_db"
+
+ALIAS_DEFINITIONS = {
+    "employee": ("EmployeeAliases", "employee_id", EMPLOYEES_TABLE, "full_name"),
+    "object": ("ObjectAliases", "object_id", OBJECTS_TABLE, "name"),
+    "location": ("LocationAliases", "location_id", "Locations", "name"),
+    "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
+}
+
 class Database:
-    def __init__(self, path: Path = DATABASE_FILE) -> None:
-        self.path = path
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        employees_path: Path | None = None,
+        objects_path: Path | None = None,
+        products_path: Path | None = None,
+        aliases_path: Path | None = None,
+    ) -> None:
+        self.path = path or DATABASE_FILE
+        component_dir = self.path.parent
+        self.employees_path = employees_path or component_dir / EMPLOYEES_DATABASE_FILE.name
+        self.objects_path = objects_path or component_dir / OBJECTS_DATABASE_FILE.name
+        self.products_path = products_path or component_dir / PRODUCTS_DATABASE_FILE.name
+        self.aliases_path = aliases_path or component_dir / ALIASES_DATABASE_FILE.name
+        paths = [
+            self.path,
+            self.employees_path,
+            self.objects_path,
+            self.products_path,
+            self.aliases_path,
+        ]
+        if len({_database_path_key(item) for item in paths}) != len(paths):
+            raise ValueError("Каждый компонент ProLOG должен использовать отдельный файл базы данных")
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def connect(self, *, foreign_keys: bool = True) -> Iterator[sqlite3.Connection]:
+        for path in self.database_paths().values():
+            path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute(f"PRAGMA foreign_keys = {'ON' if foreign_keys else 'OFF'}")
         connection.execute("PRAGMA busy_timeout = 30000")
+        connection.execute("ATTACH DATABASE ? AS employees_db", (str(self.employees_path),))
+        connection.execute("ATTACH DATABASE ? AS objects_db", (str(self.objects_path),))
+        connection.execute("ATTACH DATABASE ? AS products_db", (str(self.products_path),))
+        connection.execute("ATTACH DATABASE ? AS aliases_db", (str(self.aliases_path),))
         try:
             yield connection
             connection.commit()
@@ -70,15 +117,180 @@ class Database:
             connection.close()
 
     def initialize(self) -> None:
-        with self.connect() as connection:
-            connection.executescript(SCHEMA_SQL)
+        with self.connect(foreign_keys=False) as connection:
+            connection.executescript(COMPONENT_SCHEMA_SQL)
+            self._migrate_legacy_components(connection)
+            connection.executescript(MAIN_SCHEMA_SQL)
             self._migrate(connection)
+            self._remove_external_foreign_keys(connection)
+            connection.executescript(MAIN_SCHEMA_SQL)
             self._seed(connection)
+            self._drop_legacy_component_tables(connection)
+
+    def database_paths(self) -> dict[str, Path]:
+        return {
+            "prolog": self.path,
+            "employees": self.employees_path,
+            "objects": self.objects_path,
+            "products": self.products_path,
+            "aliases": self.aliases_path,
+        }
+
+    def _migrate_legacy_components(self, connection: sqlite3.Connection) -> None:
+        tables = {
+            str(row["name"])
+            for row in connection.execute(
+                "SELECT name FROM main.sqlite_master WHERE type = 'table'"
+            )
+        }
+        migrations = {
+            "Employees": (
+                "employees_db.Employees",
+                "id, full_name, position, category, status, mobile_phone",
+            ),
+            "Objects": (
+                "objects_db.Objects",
+                "id, name, project_number, contract_number, customer, contract_type, "
+                "object_type, object_subtype, signed_date, due_date, object_status, is_active, sort_order",
+            ),
+            "Products": (
+                "products_db.Products",
+                "id, object_id, serial_number, name, code, product_status, readiness_percent, "
+                "start_date, release_date, is_active, sort_order",
+            ),
+            "EmployeeAliases": (
+                "aliases_db.EmployeeAliases",
+                "alias_normalized, original_alias, employee_id, created_at, updated_at",
+            ),
+            "ObjectAliases": (
+                "aliases_db.ObjectAliases",
+                "alias_normalized, original_alias, object_id, created_at, updated_at",
+            ),
+            "LocationAliases": (
+                "aliases_db.LocationAliases",
+                "alias_normalized, original_alias, location_id, created_at, updated_at",
+            ),
+            "ProductAliases": (
+                "aliases_db.ProductAliases",
+                "alias_normalized, original_alias, product_id, created_at, updated_at",
+            ),
+        }
+        for source_table, (target_table, columns) in migrations.items():
+            if source_table not in tables:
+                continue
+            connection.execute(
+                f"INSERT OR IGNORE INTO {target_table} ({columns}) "
+                f"SELECT {columns} FROM main.{source_table}"
+            )
+
+    def _drop_legacy_component_tables(self, connection: sqlite3.Connection) -> None:
+        for table in (
+            "ProductAliases",
+            "ObjectAliases",
+            "EmployeeAliases",
+            "LocationAliases",
+            "Products",
+            "Objects",
+            "Employees",
+        ):
+            connection.execute(f"DROP TABLE IF EXISTS main.{table}")
+
+    def _remove_external_foreign_keys(self, connection: sqlite3.Connection) -> None:
+        definitions = {
+            "WorkLogEntries": """
+                CREATE TABLE WorkLogEntries_component_migration (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    employee_id INTEGER NOT NULL,
+                    work_date TEXT NOT NULL,
+                    location_id INTEGER REFERENCES Locations(id),
+                    object_id INTEGER,
+                    product_id INTEGER,
+                    work_type_id INTEGER REFERENCES WorkTypes(id),
+                    description TEXT NOT NULL DEFAULT '',
+                    hours REAL NOT NULL DEFAULT 0,
+                    comment TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """,
+            "MaxUserBindings": """
+                CREATE TABLE MaxUserBindings_component_migration (
+                    max_user_id INTEGER PRIMARY KEY,
+                    employee_id INTEGER NOT NULL,
+                    username_snapshot TEXT NOT NULL DEFAULT '',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """,
+            "WorkBotImportRows": """
+                CREATE TABLE WorkBotImportRows_component_migration (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    max_message_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    source_index INTEGER NOT NULL,
+                    source_kind TEXT NOT NULL,
+                    sender_id INTEGER NOT NULL,
+                    chat_id INTEGER,
+                    received_at TEXT NOT NULL DEFAULT '',
+                    content_hash TEXT NOT NULL,
+                    raw_text TEXT NOT NULL DEFAULT '',
+                    source_fragment TEXT NOT NULL DEFAULT '',
+                    employee_text TEXT NOT NULL DEFAULT '',
+                    work_date TEXT NOT NULL,
+                    work_types TEXT NOT NULL DEFAULT '',
+                    hours REAL NOT NULL DEFAULT 0,
+                    object_text TEXT NOT NULL DEFAULT '',
+                    location_text TEXT NOT NULL DEFAULT '',
+                    product_text TEXT NOT NULL DEFAULT '',
+                    confidence REAL NOT NULL DEFAULT 0,
+                    employee_id INTEGER,
+                    object_id INTEGER,
+                    location_id INTEGER REFERENCES Locations(id),
+                    work_type_id INTEGER REFERENCES WorkTypes(id),
+                    product_id INTEGER,
+                    status TEXT NOT NULL DEFAULT 'new',
+                    error_message TEXT NOT NULL DEFAULT '',
+                    worklog_entry_id INTEGER UNIQUE REFERENCES WorkLogEntries(id),
+                    imported_at TEXT,
+                    reviewed_by TEXT NOT NULL DEFAULT '',
+                    reviewed_at TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(max_message_id, revision, source_index)
+                )
+            """,
+        }
+        external_tables = {"Employees", "Objects", "Products"}
+        for table, definition in definitions.items():
+            parents = {
+                str(row["table"])
+                for row in connection.execute(f"PRAGMA main.foreign_key_list({table})")
+            }
+            if not parents & external_tables:
+                continue
+            columns = [
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA main.table_info({table})")
+            ]
+            temporary = f"{table}_component_migration"
+            connection.execute(f"DROP TABLE IF EXISTS {temporary}")
+            connection.execute(definition)
+            column_list = ", ".join(columns)
+            connection.execute(
+                f"INSERT INTO {temporary} ({column_list}) SELECT {column_list} FROM {table}"
+            )
+            connection.execute(f"DROP TABLE {table}")
+            connection.execute(f"ALTER TABLE {temporary} RENAME TO {table}")
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
-        employee_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Employees)")}
+        employee_columns = {
+            row["name"] for row in connection.execute("PRAGMA employees_db.table_info(Employees)")
+        }
         if "mobile_phone" not in employee_columns:
-            connection.execute("ALTER TABLE Employees ADD COLUMN mobile_phone TEXT NOT NULL DEFAULT ''")
+            connection.execute(
+                "ALTER TABLE employees_db.Employees ADD COLUMN mobile_phone TEXT NOT NULL DEFAULT ''"
+            )
         position_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Positions)")}
         if "category" not in position_columns:
             connection.execute("ALTER TABLE Positions ADD COLUMN category TEXT NOT NULL DEFAULT '1-3'")
@@ -101,7 +313,9 @@ class Database:
             connection.execute("ALTER TABLE PayRates ADD COLUMN holiday_coeff TEXT NOT NULL DEFAULT '1'")
         if "saturday_coeff" not in pay_rate_columns:
             connection.execute("ALTER TABLE PayRates ADD COLUMN saturday_coeff TEXT NOT NULL DEFAULT '1'")
-        object_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Objects)")}
+        object_columns = {
+            row["name"] for row in connection.execute("PRAGMA objects_db.table_info(Objects)")
+        }
         object_defaults = {
             "project_number": "",
             "contract_number": "",
@@ -115,20 +329,28 @@ class Database:
         }
         for column, default in object_defaults.items():
             if column not in object_columns:
-                connection.execute(f"ALTER TABLE Objects ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'")
+                connection.execute(
+                    f"ALTER TABLE objects_db.Objects ADD COLUMN {column} TEXT NOT NULL DEFAULT '{default}'"
+                )
         if "sort_order" not in object_columns:
-            connection.execute("ALTER TABLE Objects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
-        product_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Products)")}
+            connection.execute(
+                "ALTER TABLE objects_db.Objects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+            )
+        product_columns = {
+            row["name"] for row in connection.execute("PRAGMA products_db.table_info(Products)")
+        }
         if "sort_order" not in product_columns:
-            connection.execute("ALTER TABLE Products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+            connection.execute(
+                "ALTER TABLE products_db.Products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+            )
         worklog_columns = {row["name"] for row in connection.execute("PRAGMA table_info(WorkLogEntries)")}
         if "product_id" not in worklog_columns:
-            connection.execute("ALTER TABLE WorkLogEntries ADD COLUMN product_id INTEGER REFERENCES Products(id)")
+            connection.execute("ALTER TABLE WorkLogEntries ADD COLUMN product_id INTEGER")
         workbot_columns = {row["name"] for row in connection.execute("PRAGMA table_info(WorkBotImportRows)")}
         if "product_text" not in workbot_columns:
             connection.execute("ALTER TABLE WorkBotImportRows ADD COLUMN product_text TEXT NOT NULL DEFAULT ''")
         if "product_id" not in workbot_columns:
-            connection.execute("ALTER TABLE WorkBotImportRows ADD COLUMN product_id INTEGER REFERENCES Products(id)")
+            connection.execute("ALTER TABLE WorkBotImportRows ADD COLUMN product_id INTEGER")
         connection.execute("UPDATE Positions SET category = '—', student_allowed = 0 WHERE name = 'Мастер чистоты'")
         connection.execute(
             """
@@ -148,10 +370,10 @@ class Database:
             (STUDENT_CATEGORY, LEGACY_STUDENT_CATEGORY),
         )
         connection.execute(
-            "UPDATE Employees SET category = ? WHERE category = ?",
+            "UPDATE employees_db.Employees SET category = ? WHERE category = ?",
             (STUDENT_CATEGORY, LEGACY_STUDENT_CATEGORY),
         )
-        self._normalize_sort_order(connection, "Objects", "name COLLATE NOCASE, id")
+        self._normalize_sort_order(connection, OBJECTS_TABLE, "name COLLATE NOCASE, id")
         self._normalize_product_sort_order(connection)
         self._sync_pay_rates(connection)
 
@@ -159,7 +381,7 @@ class Database:
         seed_values = {
             "Locations": load_names("locations"),
             "EmployeeGroups": load_names("employee_groups"),
-            "Objects": load_names("objects"),
+            OBJECTS_TABLE: load_names("objects"),
             "WorkTypes": load_names("work_types"),
         }
         for table, values in seed_values.items():
@@ -175,11 +397,11 @@ class Database:
                         (value, existing_id),
                     )
                 else:
-                    if table == "Objects":
+                    if table == OBJECTS_TABLE:
                         cursor = connection.execute(
-                            """
-                            INSERT INTO Objects (name, sort_order)
-                            VALUES (?, COALESCE((SELECT MAX(sort_order) + 1 FROM Objects), 1))
+                            f"""
+                            INSERT INTO {OBJECTS_TABLE} (name, sort_order)
+                            VALUES (?, COALESCE((SELECT MAX(sort_order) + 1 FROM {OBJECTS_TABLE}), 1))
                             """,
                             (value,),
                         )
@@ -238,11 +460,13 @@ class Database:
             )
 
     def _normalize_product_sort_order(self, connection: sqlite3.Connection) -> None:
-        object_rows = connection.execute("SELECT DISTINCT object_id FROM Products").fetchall()
+        object_rows = connection.execute(
+            f"SELECT DISTINCT object_id FROM {PRODUCTS_TABLE}"
+        ).fetchall()
         for row in object_rows:
             self._normalize_sort_order(
                 connection,
-                "Products",
+                PRODUCTS_TABLE,
                 "name COLLATE NOCASE, serial_number COLLATE NOCASE, id",
                 "object_id = ?",
                 (row["object_id"],),
@@ -352,7 +576,7 @@ class DirectoryRepository:
         if table_key != "objects":
             raise ValueError("Ручной порядок поддерживается только для объектов и изделий")
         with self.database.connect() as connection:
-            self._move_ordered_row(connection, "Objects", item_id, direction)
+            self._move_ordered_row(connection, OBJECTS_TABLE, item_id, direction)
 
     def ui_setting(self, key: str, default: str = "") -> str:
         with self.database.connect() as connection:
@@ -368,6 +592,81 @@ class DirectoryRepository:
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value
                 """,
                 (key, value),
+            )
+
+    def list_aliases(self) -> list[AliasItem]:
+        items: list[AliasItem] = []
+        with self.database.connect() as connection:
+            for alias_type, (table, target_column, target_table, target_name_column) in ALIAS_DEFINITIONS.items():
+                rows = connection.execute(
+                    f"""
+                    SELECT a.alias_normalized, a.original_alias, a.{target_column} AS target_id,
+                           COALESCE(t.{target_name_column}, '') AS target_name
+                    FROM {ALIASES_SCHEMA}.{table} a
+                    LEFT JOIN {target_table} t ON t.id = a.{target_column}
+                    ORDER BY a.original_alias COLLATE NOCASE
+                    """
+                ).fetchall()
+                items.extend(
+                    AliasItem(
+                        alias_type=alias_type,
+                        original_alias=str(row["original_alias"] or ""),
+                        target_id=int(row["target_id"]),
+                        target_name=str(row["target_name"] or ""),
+                        alias_normalized=str(row["alias_normalized"] or ""),
+                    )
+                    for row in rows
+                )
+        return sorted(items, key=lambda item: (item.alias_type, item.original_alias.casefold()))
+
+    def save_alias(
+        self,
+        alias: AliasItem,
+        previous_type: str = "",
+        previous_normalized: str = "",
+    ) -> None:
+        original = alias.original_alias.strip()
+        normalized = _normalize_alias(original)
+        if not original:
+            raise ValueError("Укажите алиас")
+        if alias.alias_type not in ALIAS_DEFINITIONS:
+            raise ValueError("Выберите тип алиаса")
+        table, target_column, target_table, _target_name = ALIAS_DEFINITIONS[alias.alias_type]
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.database.connect() as connection:
+            target = connection.execute(
+                f"SELECT id FROM {target_table} WHERE id = ?", (alias.target_id,)
+            ).fetchone()
+            if target is None:
+                raise ValueError("Выбранная запись справочника не найдена")
+            if previous_type in ALIAS_DEFINITIONS and previous_normalized:
+                previous_table = ALIAS_DEFINITIONS[previous_type][0]
+                connection.execute(
+                    f"DELETE FROM {ALIASES_SCHEMA}.{previous_table} WHERE alias_normalized = ?",
+                    (previous_normalized,),
+                )
+            connection.execute(
+                f"""
+                INSERT INTO {ALIASES_SCHEMA}.{table}(
+                    alias_normalized, original_alias, {target_column}, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(alias_normalized) DO UPDATE SET
+                    original_alias = excluded.original_alias,
+                    {target_column} = excluded.{target_column},
+                    updated_at = excluded.updated_at
+                """,
+                (normalized, original, alias.target_id, now, now),
+            )
+
+    def delete_alias(self, alias_type: str, alias_normalized: str) -> None:
+        if alias_type not in ALIAS_DEFINITIONS:
+            raise ValueError("Неизвестный тип алиаса")
+        table = ALIAS_DEFINITIONS[alias_type][0]
+        with self.database.connect() as connection:
+            connection.execute(
+                f"DELETE FROM {ALIASES_SCHEMA}.{table} WHERE alias_normalized = ?",
+                (alias_normalized,),
             )
 
     def upsert(self, table_key: str, name: str) -> int:
@@ -413,9 +712,9 @@ class DirectoryRepository:
                     )
             elif table_key == "objects":
                 connection.execute(
-                    """
-                    INSERT INTO Objects (name, is_active, sort_order)
-                    VALUES (?, 1, COALESCE((SELECT MAX(sort_order) + 1 FROM Objects), 1))
+                    f"""
+                    INSERT INTO {OBJECTS_TABLE} (name, is_active, sort_order)
+                    VALUES (?, 1, COALESCE((SELECT MAX(sort_order) + 1 FROM {OBJECTS_TABLE}), 1))
                     ON CONFLICT(name) DO UPDATE SET is_active = 1
                     """,
                     (normalized,),
@@ -501,8 +800,8 @@ class DirectoryRepository:
             raise ValueError("Укажите общее наименование объекта")
         with self.database.connect() as connection:
             connection.execute(
-                """
-                UPDATE Objects
+                f"""
+                UPDATE {OBJECTS_TABLE}
                 SET name = ?,
                     project_number = ?,
                     contract_number = ?,
@@ -602,12 +901,12 @@ class DirectoryRepository:
             connection.execute("DELETE FROM WorkCalendarDays WHERE id = ?", (item_id,))
 
     def list_products(self, active_only: bool = False) -> list[ProductItem]:
-        sql = """
+        sql = f"""
             SELECT
                 p.*,
                 o.name AS object_name
-            FROM Products p
-            JOIN Objects o ON o.id = p.object_id
+            FROM {PRODUCTS_TABLE} p
+            JOIN {OBJECTS_TABLE} o ON o.id = p.object_id
         """
         if active_only:
             sql += " WHERE p.is_active = 1"
@@ -624,13 +923,13 @@ class DirectoryRepository:
         with self.database.connect() as connection:
             if product.id:
                 current = connection.execute(
-                    "SELECT object_id FROM Products WHERE id = ?",
+                    f"SELECT object_id FROM {PRODUCTS_TABLE} WHERE id = ?",
                     (product.id,),
                 ).fetchone()
                 object_changed = current is not None and current["object_id"] != product.object_id
                 connection.execute(
-                    """
-                    UPDATE Products
+                    f"""
+                    UPDATE {PRODUCTS_TABLE}
                     SET object_id = ?,
                         serial_number = ?,
                         name = ?,
@@ -657,12 +956,12 @@ class DirectoryRepository:
                 )
                 if object_changed:
                     connection.execute(
-                        """
-                        UPDATE Products
+                        f"""
+                        UPDATE {PRODUCTS_TABLE}
                         SET sort_order = COALESCE(
                             (
                                 SELECT MAX(other.sort_order) + 1
-                                FROM Products other
+                                FROM {PRODUCTS_TABLE} other
                                 WHERE other.object_id = ? AND other.id <> ?
                             ),
                             1
@@ -673,14 +972,14 @@ class DirectoryRepository:
                     )
                 return product.id
             cursor = connection.execute(
-                """
-                INSERT INTO Products (
+                f"""
+                INSERT INTO {PRODUCTS_TABLE} (
                     object_id, serial_number, name, code, product_status,
                     readiness_percent, start_date, release_date, is_active, sort_order
                 )
                 VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    COALESCE((SELECT MAX(sort_order) + 1 FROM Products WHERE object_id = ?), 1)
+                    COALESCE((SELECT MAX(sort_order) + 1 FROM {PRODUCTS_TABLE} WHERE object_id = ?), 1)
                 )
                 """,
                 (
@@ -700,23 +999,41 @@ class DirectoryRepository:
 
     def set_product_active(self, product_id: int, is_active: bool) -> None:
         with self.database.connect() as connection:
-            connection.execute("UPDATE Products SET is_active = ? WHERE id = ?", (int(is_active), product_id))
+            connection.execute(
+                f"UPDATE {PRODUCTS_TABLE} SET is_active = ? WHERE id = ?",
+                (int(is_active), product_id),
+            )
 
     def delete_product(self, product_id: int) -> None:
         with self.database.connect() as connection:
-            connection.execute("DELETE FROM Products WHERE id = ?", (product_id,))
+            used = connection.execute(
+                "SELECT COUNT(*) AS count FROM WorkLogEntries WHERE product_id = ?",
+                (product_id,),
+            ).fetchone()
+            if used and used["count"]:
+                raise ValueError("Нельзя удалить изделие: оно используется в журнале работ")
+            connection.execute(
+                "DELETE FROM aliases_db.ProductAliases WHERE product_id = ?",
+                (product_id,),
+            )
+            connection.execute(
+                "UPDATE WorkBotImportRows SET product_id = NULL "
+                "WHERE product_id = ? AND worklog_entry_id IS NULL",
+                (product_id,),
+            )
+            connection.execute(f"DELETE FROM {PRODUCTS_TABLE} WHERE id = ?", (product_id,))
 
     def move_product(self, product_id: int, direction: int) -> None:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT object_id FROM Products WHERE id = ?",
+                f"SELECT object_id FROM {PRODUCTS_TABLE} WHERE id = ?",
                 (product_id,),
             ).fetchone()
             if row is None:
                 return
             self._move_ordered_row(
                 connection,
-                "Products",
+                PRODUCTS_TABLE,
                 product_id,
                 direction,
                 scope_column="object_id",
@@ -885,6 +1202,33 @@ class DirectoryRepository:
                     ).fetchone()
                     if int(used["count"] or 0):
                         raise ValueError("Нельзя удалить группу: она используется в справочнике должностей")
+                if table_key == "objects":
+                    products = connection.execute(
+                        f"SELECT COUNT(*) AS count FROM {PRODUCTS_TABLE} WHERE object_id = ?",
+                        (item_id,),
+                    ).fetchone()
+                    if products and products["count"]:
+                        raise ValueError("Нельзя удалить объект: к нему привязаны изделия")
+                    worklogs = connection.execute(
+                        "SELECT COUNT(*) AS count FROM WorkLogEntries WHERE object_id = ?",
+                        (item_id,),
+                    ).fetchone()
+                    if worklogs and worklogs["count"]:
+                        raise ValueError("Нельзя удалить объект: он используется в журнале работ")
+                    connection.execute(
+                        "DELETE FROM aliases_db.ObjectAliases WHERE object_id = ?",
+                        (item_id,),
+                    )
+                    connection.execute(
+                        "UPDATE WorkBotImportRows SET object_id = NULL "
+                        "WHERE object_id = ? AND worklog_entry_id IS NULL",
+                        (item_id,),
+                    )
+                if table_key == "locations":
+                    connection.execute(
+                        "DELETE FROM aliases_db.LocationAliases WHERE location_id = ?",
+                        (item_id,),
+                    )
                 connection.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
         except ValueError:
             raise
@@ -945,9 +1289,9 @@ class EmployeeRepository:
         self.database = database
 
     def list(self, search: str = "", position: str = "", group: str = "") -> list[Employee]:
-        query = """
+        query = f"""
             SELECT e.*
-            FROM Employees e
+            FROM {EMPLOYEES_TABLE} e
             LEFT JOIN Positions p ON p.name = e.position
             WHERE e.status = 'Активен'
         """
@@ -976,9 +1320,9 @@ class EmployeeRepository:
     def get(self, employee_id: int) -> Employee | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                """
+                f"""
                 SELECT e.*
-                FROM Employees e
+                FROM {EMPLOYEES_TABLE} e
                 WHERE e.id = ?
                 """,
                 (employee_id,),
@@ -989,8 +1333,8 @@ class EmployeeRepository:
         with self.database.connect() as connection:
             if employee.id:
                 connection.execute(
-                    """
-                    UPDATE Employees
+                    f"""
+                    UPDATE {EMPLOYEES_TABLE}
                     SET full_name = ?, position = ?, category = ?, status = ?, mobile_phone = ?
                     WHERE id = ?
                     """,
@@ -1005,8 +1349,8 @@ class EmployeeRepository:
                 )
                 return employee.id
             cursor = connection.execute(
-                """
-                INSERT INTO Employees (full_name, position, category, status, mobile_phone)
+                f"""
+                INSERT INTO {EMPLOYEES_TABLE} (full_name, position, category, status, mobile_phone)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(full_name) DO UPDATE SET
                     position = excluded.position,
@@ -1014,7 +1358,7 @@ class EmployeeRepository:
                     status = excluded.status,
                     mobile_phone = CASE
                         WHEN excluded.mobile_phone <> '' THEN excluded.mobile_phone
-                        ELSE Employees.mobile_phone
+                        ELSE mobile_phone
                     END
                 """,
                 (
@@ -1025,7 +1369,10 @@ class EmployeeRepository:
                     employee.mobile_phone.strip(),
                 ),
             )
-            row = connection.execute("SELECT id FROM Employees WHERE full_name = ?", (employee.full_name.strip(),)).fetchone()
+            row = connection.execute(
+                f"SELECT id FROM {EMPLOYEES_TABLE} WHERE full_name = ?",
+                (employee.full_name.strip(),),
+            ).fetchone()
             return int(row["id"] if row else cursor.lastrowid)
 
     def delete(self, employee_id: int) -> None:
@@ -1036,7 +1383,20 @@ class EmployeeRepository:
             ).fetchone()
             if row and row["count"]:
                 raise ValueError("Нельзя удалить сотрудника: у него есть записи работ")
-            connection.execute("DELETE FROM Employees WHERE id = ?", (employee_id,))
+            connection.execute(
+                "DELETE FROM aliases_db.EmployeeAliases WHERE employee_id = ?",
+                (employee_id,),
+            )
+            connection.execute(
+                "DELETE FROM MaxUserBindings WHERE employee_id = ?",
+                (employee_id,),
+            )
+            connection.execute(
+                "UPDATE WorkBotImportRows SET employee_id = NULL "
+                "WHERE employee_id = ? AND worklog_entry_id IS NULL",
+                (employee_id,),
+            )
+            connection.execute(f"DELETE FROM {EMPLOYEES_TABLE} WHERE id = ?", (employee_id,))
 
     def _map(self, row: sqlite3.Row) -> Employee:
         return Employee(
@@ -1163,7 +1523,7 @@ class WorkLogRepository:
         )
 
 
-WORKLOG_SELECT = """
+WORKLOG_SELECT = f"""
     SELECT
         w.*,
         e.full_name AS employee_name,
@@ -1172,45 +1532,15 @@ WORKLOG_SELECT = """
         p.name AS product_name,
         wt.name AS work_type_name
     FROM WorkLogEntries w
-    JOIN Employees e ON e.id = w.employee_id
+    JOIN {EMPLOYEES_TABLE} e ON e.id = w.employee_id
     LEFT JOIN Locations l ON l.id = w.location_id
-    LEFT JOIN Objects o ON o.id = w.object_id
-    LEFT JOIN Products p ON p.id = w.product_id
+    LEFT JOIN {OBJECTS_TABLE} o ON o.id = w.object_id
+    LEFT JOIN {PRODUCTS_TABLE} p ON p.id = w.product_id
     LEFT JOIN WorkTypes wt ON wt.id = w.work_type_id
 """
 
 
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS Objects (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    project_number TEXT NOT NULL DEFAULT '',
-    contract_number TEXT NOT NULL DEFAULT '',
-    customer TEXT NOT NULL DEFAULT '',
-    contract_type TEXT NOT NULL DEFAULT '',
-    object_type TEXT NOT NULL DEFAULT '',
-    object_subtype TEXT NOT NULL DEFAULT '',
-    signed_date TEXT NOT NULL DEFAULT '',
-    due_date TEXT NOT NULL DEFAULT '',
-    object_status TEXT NOT NULL DEFAULT 'В работе',
-    is_active INTEGER NOT NULL DEFAULT 1,
-    sort_order INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS Products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    object_id INTEGER NOT NULL REFERENCES Objects(id),
-    serial_number TEXT NOT NULL DEFAULT '',
-    name TEXT NOT NULL,
-    code TEXT NOT NULL DEFAULT '',
-    product_status TEXT NOT NULL DEFAULT 'В изготовлении',
-    readiness_percent INTEGER NOT NULL DEFAULT 0,
-    start_date TEXT NOT NULL DEFAULT '',
-    release_date TEXT NOT NULL DEFAULT '',
-    is_active INTEGER NOT NULL DEFAULT 1,
-    sort_order INTEGER NOT NULL DEFAULT 0
-);
-
+MAIN_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS WorkTypes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
@@ -1254,22 +1584,13 @@ CREATE TABLE IF NOT EXISTS Locations (
     is_active INTEGER NOT NULL DEFAULT 1
 );
 
-CREATE TABLE IF NOT EXISTS Employees (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    full_name TEXT NOT NULL UNIQUE,
-    position TEXT NOT NULL DEFAULT '',
-    category TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'Активен',
-    mobile_phone TEXT NOT NULL DEFAULT ''
-);
-
 CREATE TABLE IF NOT EXISTS WorkLogEntries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    employee_id INTEGER NOT NULL REFERENCES Employees(id),
+    employee_id INTEGER NOT NULL,
     work_date TEXT NOT NULL,
     location_id INTEGER REFERENCES Locations(id),
-    object_id INTEGER REFERENCES Objects(id),
-    product_id INTEGER REFERENCES Products(id),
+    object_id INTEGER,
+    product_id INTEGER,
     work_type_id INTEGER REFERENCES WorkTypes(id),
     description TEXT NOT NULL DEFAULT '',
     hours REAL NOT NULL DEFAULT 0,
@@ -1315,41 +1636,9 @@ CREATE TABLE IF NOT EXISTS WorkCalendarDays (
 
 CREATE TABLE IF NOT EXISTS MaxUserBindings (
     max_user_id INTEGER PRIMARY KEY,
-    employee_id INTEGER NOT NULL REFERENCES Employees(id),
+    employee_id INTEGER NOT NULL,
     username_snapshot TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS EmployeeAliases (
-    alias_normalized TEXT PRIMARY KEY,
-    original_alias TEXT NOT NULL,
-    employee_id INTEGER NOT NULL REFERENCES Employees(id),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS ObjectAliases (
-    alias_normalized TEXT PRIMARY KEY,
-    original_alias TEXT NOT NULL,
-    object_id INTEGER NOT NULL REFERENCES Objects(id),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS LocationAliases (
-    alias_normalized TEXT PRIMARY KEY,
-    original_alias TEXT NOT NULL,
-    location_id INTEGER NOT NULL REFERENCES Locations(id),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS ProductAliases (
-    alias_normalized TEXT PRIMARY KEY,
-    original_alias TEXT NOT NULL,
-    product_id INTEGER NOT NULL REFERENCES Products(id),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -1374,11 +1663,11 @@ CREATE TABLE IF NOT EXISTS WorkBotImportRows (
     location_text TEXT NOT NULL DEFAULT '',
     product_text TEXT NOT NULL DEFAULT '',
     confidence REAL NOT NULL DEFAULT 0,
-    employee_id INTEGER REFERENCES Employees(id),
-    object_id INTEGER REFERENCES Objects(id),
+    employee_id INTEGER,
+    object_id INTEGER,
     location_id INTEGER REFERENCES Locations(id),
     work_type_id INTEGER REFERENCES WorkTypes(id),
-    product_id INTEGER REFERENCES Products(id),
+    product_id INTEGER,
     status TEXT NOT NULL DEFAULT 'new',
     error_message TEXT NOT NULL DEFAULT '',
     worklog_entry_id INTEGER UNIQUE REFERENCES WorkLogEntries(id),
@@ -1399,7 +1688,6 @@ CREATE INDEX IF NOT EXISTS idx_worklog_employee_date ON WorkLogEntries(employee_
 CREATE INDEX IF NOT EXISTS idx_worklog_date ON WorkLogEntries(work_date);
 CREATE INDEX IF NOT EXISTS idx_worklog_product ON WorkLogEntries(product_id);
 CREATE INDEX IF NOT EXISTS idx_payrates_position ON PayRates(position_id);
-CREATE INDEX IF NOT EXISTS idx_products_object ON Products(object_id);
 CREATE INDEX IF NOT EXISTS idx_import_rows_batch ON ImportRows(batch_id);
 CREATE INDEX IF NOT EXISTS idx_work_calendar_date ON WorkCalendarDays(work_date);
 CREATE INDEX IF NOT EXISTS idx_workbot_import_status ON WorkBotImportRows(status);
@@ -1411,8 +1699,92 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_import_batches_completed_hash
 """
 
 
+COMPONENT_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS employees_db.Employees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    full_name TEXT NOT NULL UNIQUE,
+    position TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'Активен',
+    mobile_phone TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS objects_db.Objects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    project_number TEXT NOT NULL DEFAULT '',
+    contract_number TEXT NOT NULL DEFAULT '',
+    customer TEXT NOT NULL DEFAULT '',
+    contract_type TEXT NOT NULL DEFAULT '',
+    object_type TEXT NOT NULL DEFAULT '',
+    object_subtype TEXT NOT NULL DEFAULT '',
+    signed_date TEXT NOT NULL DEFAULT '',
+    due_date TEXT NOT NULL DEFAULT '',
+    object_status TEXT NOT NULL DEFAULT 'В работе',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS products_db.Products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    object_id INTEGER NOT NULL,
+    serial_number TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    code TEXT NOT NULL DEFAULT '',
+    product_status TEXT NOT NULL DEFAULT 'В изготовлении',
+    readiness_percent INTEGER NOT NULL DEFAULT 0,
+    start_date TEXT NOT NULL DEFAULT '',
+    release_date TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS products_db.idx_products_object ON Products(object_id);
+
+CREATE TABLE IF NOT EXISTS aliases_db.EmployeeAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    employee_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aliases_db.ObjectAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    object_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aliases_db.LocationAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    location_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aliases_db.ProductAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    product_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+
 def _default_position_category(name: str) -> str:
     return "—" if name.strip().casefold() == "мастер чистоты" else "1-3"
+
+
+def _database_path_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
+def _normalize_alias(value: str) -> str:
+    return " ".join(value.replace("ё", "е").replace("Ё", "Е").casefold().split())
 
 
 def _default_student_allowed(name: str) -> bool:

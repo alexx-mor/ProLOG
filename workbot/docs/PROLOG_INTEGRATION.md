@@ -18,8 +18,10 @@ WorkBot уже:
 - формирует Excel;
 - имеет управление только для владельца.
 
-WorkBot пока хранит данные в `data/workbot.sqlite3`. ProLOG хранит основные
-данные в `data/prolog.sqlite3`. Автоматического обмена между базами нет.
+WorkBot хранит исходные данные в `data/workbot.sqlite3`. ProLOG использует ядро
+`data/prolog.sqlite3` и отдельные компонентные базы `employees.sqlite3`,
+`objects.sqlite3`, `products.sqlite3` и `aliases.sqlite3`. Контролируемый импорт
+реализован через экран входящих отчётов.
 
 ## Соответствие данных
 
@@ -95,7 +97,7 @@ WorkBot: raw message + parsed candidate
 ```sql
 CREATE TABLE MaxUserBindings (
     max_user_id INTEGER PRIMARY KEY,
-    employee_id INTEGER NOT NULL REFERENCES Employees(id),
+    employee_id INTEGER NOT NULL,
     username_snapshot TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
@@ -103,7 +105,9 @@ CREATE TABLE MaxUserBindings (
 );
 ```
 
-Связь должна быть `MAX user_id → Employees.id`. ФИО и username нужны только
+Межфайловую целостность `employee_id` проверяет сервисный слой, поскольку SQLite
+не поддерживает внешние ключи между присоединёнными файлами. Связь должна быть
+`MAX user_id → Employees.id`. ФИО и username нужны только
 для отображения и аудита. Изменение имени профиля MAX не должно разрывать
 привязку.
 
@@ -111,9 +115,9 @@ CREATE TABLE MaxUserBindings (
 желательна дополнительная таблица текстовых алиасов сотрудников:
 
 ```sql
-CREATE TABLE EmployeeAliases (
+CREATE TABLE aliases_db.EmployeeAliases (
     alias_normalized TEXT PRIMARY KEY,
-    employee_id INTEGER NOT NULL REFERENCES Employees(id),
+    employee_id INTEGER NOT NULL,
     original_alias TEXT NOT NULL,
     is_approved INTEGER NOT NULL DEFAULT 1
 );
@@ -122,9 +126,9 @@ CREATE TABLE EmployeeAliases (
 ### `ObjectAliases`
 
 ```sql
-CREATE TABLE ObjectAliases (
+CREATE TABLE aliases_db.ObjectAliases (
     alias_normalized TEXT PRIMARY KEY,
-    object_id INTEGER NOT NULL REFERENCES Objects(id),
+    object_id INTEGER NOT NULL,
     original_alias TEXT NOT NULL,
     is_approved INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,

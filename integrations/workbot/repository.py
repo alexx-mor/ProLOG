@@ -322,12 +322,12 @@ class WorkBotRepository:
                     (row["sender_id"], entry.employee_id, now, now),
                 )
             if remember_aliases:
-                self._remember_alias(connection, "EmployeeAliases", "employee_id", row["employee_text"], entry.employee_id, now)
-                self._remember_alias(connection, "ObjectAliases", "object_id", row["object_text"], entry.object_id, now)
-                self._remember_alias(connection, "LocationAliases", "location_id", row["location_text"], entry.location_id, now)
+                self._remember_alias(connection, "aliases_db.EmployeeAliases", "employee_id", row["employee_text"], entry.employee_id, now)
+                self._remember_alias(connection, "aliases_db.ObjectAliases", "object_id", row["object_text"], entry.object_id, now)
+                self._remember_alias(connection, "aliases_db.LocationAliases", "location_id", row["location_text"], entry.location_id, now)
                 self._remember_alias(
                     connection,
-                    "ProductAliases",
+                    "aliases_db.ProductAliases",
                     "product_id",
                     product_alias_text or row["product_text"],
                     entry.product_id,
@@ -399,10 +399,10 @@ def _now() -> str:
 
 
 ALIAS_TABLES = {
-    "employee": ("EmployeeAliases", "employee_id"),
-    "object": ("ObjectAliases", "object_id"),
-    "location": ("LocationAliases", "location_id"),
-    "product": ("ProductAliases", "product_id"),
+    "employee": ("aliases_db.EmployeeAliases", "employee_id"),
+    "object": ("aliases_db.ObjectAliases", "object_id"),
+    "location": ("aliases_db.LocationAliases", "location_id"),
+    "product": ("aliases_db.ProductAliases", "product_id"),
 }
 
 INSERT_ROW_SQL = """

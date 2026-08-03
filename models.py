@@ -73,6 +73,15 @@ class DirectoryItem:
 
 
 @dataclass(slots=True)
+class AliasItem:
+    alias_type: str
+    original_alias: str
+    target_id: int
+    target_name: str = ""
+    alias_normalized: str = ""
+
+
+@dataclass(slots=True)
 class PayRate:
     position_id: int
     position_name: str
@@ -146,3 +155,7 @@ class AppSettings:
     monthly_hours_norm: int = 168
     workbot_database_path: str = ""
     prolog_database_path: str = ""
+    employees_database_path: str = ""
+    objects_database_path: str = ""
+    products_database_path: str = ""
+    aliases_database_path: str = ""

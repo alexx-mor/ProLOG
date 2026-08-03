@@ -10,17 +10,41 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from constants import DATABASE_FILE, DATA_DIR
+from constants import (
+    ALIASES_DATABASE_FILE,
+    DATABASE_FILE,
+    DATA_DIR,
+    EMPLOYEES_DATABASE_FILE,
+    OBJECTS_DATABASE_FILE,
+    PRODUCTS_DATABASE_FILE,
+)
 
 logger = logging.getLogger(__name__)
 
 REGISTRY_FILE = DATA_DIR / "database_sources.json"
 PROLOG_DATABASE = "prolog"
 WORKBOT_DATABASE = "workbot"
+EMPLOYEES_DATABASE = "employees"
+OBJECTS_DATABASE = "objects"
+PRODUCTS_DATABASE = "products"
+ALIASES_DATABASE = "aliases"
 
 _REQUIRED_TABLES = {
-    PROLOG_DATABASE: {"Employees", "Objects", "WorkLogEntries"},
+    PROLOG_DATABASE: {"WorkLogEntries", "Locations", "Positions"},
     WORKBOT_DATABASE: {"users", "messages", "reports"},
+    EMPLOYEES_DATABASE: {"Employees"},
+    OBJECTS_DATABASE: {"Objects"},
+    PRODUCTS_DATABASE: {"Products"},
+    ALIASES_DATABASE: {"EmployeeAliases", "ObjectAliases", "LocationAliases", "ProductAliases"},
+}
+
+DATABASE_KIND_LABELS = {
+    PROLOG_DATABASE: "Ядро ProLOG",
+    EMPLOYEES_DATABASE: "Сотрудники",
+    OBJECTS_DATABASE: "Объекты",
+    PRODUCTS_DATABASE: "Изделия",
+    ALIASES_DATABASE: "Алиасы",
+    WORKBOT_DATABASE: "WorkBot",
 }
 
 
@@ -38,10 +62,29 @@ class DatabaseRegistry:
     def __init__(self, path: Path = REGISTRY_FILE) -> None:
         self.path = path
 
-    def list(self, prolog_path: str = "", workbot_path: str = "") -> list[DatabaseSource]:
+    def list(
+        self,
+        prolog_path: str = "",
+        workbot_path: str = "",
+        employees_path: str = "",
+        objects_path: str = "",
+        products_path: str = "",
+        aliases_path: str = "",
+    ) -> list[DatabaseSource]:
         sources = self._load()
         known = {(item.kind, _path_key(item.path)) for item in sources}
-        candidates = [(PROLOG_DATABASE, prolog_path or str(DATABASE_FILE), "Основная база ProLOG")]
+        component_dir = Path(prolog_path or DATABASE_FILE).parent
+        candidates = [
+            (PROLOG_DATABASE, prolog_path or str(DATABASE_FILE), "Основная база ProLOG"),
+            (
+                EMPLOYEES_DATABASE,
+                employees_path or str(component_dir / EMPLOYEES_DATABASE_FILE.name),
+                "Сотрудники ProLOG",
+            ),
+            (OBJECTS_DATABASE, objects_path or str(component_dir / OBJECTS_DATABASE_FILE.name), "Объекты ProLOG"),
+            (PRODUCTS_DATABASE, products_path or str(component_dir / PRODUCTS_DATABASE_FILE.name), "Изделия ProLOG"),
+            (ALIASES_DATABASE, aliases_path or str(component_dir / ALIASES_DATABASE_FILE.name), "Алиасы ProLOG"),
+        ]
         if workbot_path:
             candidates.append((WORKBOT_DATABASE, workbot_path, "База WorkBot"))
         for kind, value, name in candidates:
@@ -126,12 +169,12 @@ class DatabaseRegistry:
             return False, f"Не удалось открыть базу данных: {exc}"
         missing = _REQUIRED_TABLES.get(kind, set()) - tables
         if missing:
-            label = "ProLOG" if kind == PROLOG_DATABASE else "WorkBot"
+            label = DATABASE_KIND_LABELS.get(kind, kind)
             return False, f"Файл не является базой {label}: отсутствуют необходимые таблицы"
         return True, "Доступна"
 
     def detect_kind(self, path: Path) -> str:
-        for kind in (PROLOG_DATABASE, WORKBOT_DATABASE):
+        for kind in _REQUIRED_TABLES:
             if self.check(str(path), kind)[0]:
                 return kind
         return ""

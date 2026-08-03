@@ -3,6 +3,7 @@ __pycache__/
 .venv/
 .venv-win/
 build/
+build_release/
 dist/
 dist_release/
 backups/

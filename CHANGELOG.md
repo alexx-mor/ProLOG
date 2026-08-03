@@ -1,5 +1,35 @@
 ﻿# Changelog
 
+## 2026-08-03 - Component databases and editable aliases
+
+### Added
+
+- Split employees, objects, products and confirmed aliases into independent
+  SQLite component databases while preserving their stable IDs and work-log links.
+- Added the editable `Алиасы` directory for employee, object, location and product
+  spellings used by WorkBot matching.
+- Added component database discovery, validation and selection to the database
+  directory. Each selected component can reside in a local or network folder.
+- Added automatic one-time migration from the previous monolithic ProLOG database,
+  with explicit integrity checks for cross-component references.
+
+### Changed
+
+- Database columns are user-resizable, database double-click opens the full source
+  editor, and adding arbitrary database records is hidden for this MVP stage.
+- Restored `Открыть диалог в MAX`, renamed the binding close action to `Отмена`,
+  blocked accidental mouse-wheel changes and softened row-state highlighting.
+- Kept the incoming-report editor pinned to the top and enlarged the description
+  and source-message areas for maximized windows.
+- Bumped the application and Windows executable version to `0.5.0`.
+
+### Verified
+
+- All project tests pass: `25 passed`.
+- A migration dry run on the production backup preserved 47 employees, 14 objects,
+  2 products, 2 aliases and all existing work-log links.
+- Foreign-key enforcement remains enabled for all relationships inside the core.
+
 ## 2026-08-03 - Database registry and manual MAX identity
 
 ### Added

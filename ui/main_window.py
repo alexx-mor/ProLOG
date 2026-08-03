@@ -422,6 +422,8 @@ class MainWindow(QMainWindow):
             config_manager=self.config_manager,
             app_settings=self.config,
             current_database_path=self.database.path,
+            current_database_paths=self.database.database_paths(),
+            employee_service=self.employees,
         )
         dialog.exec()
         self.workbot_inbox.set_source_path(self.config.workbot_database_path)
@@ -443,6 +445,8 @@ class MainWindow(QMainWindow):
             config_manager=self.config_manager,
             app_settings=self.config,
             current_database_path=self.database.path,
+            current_database_paths=self.database.database_paths(),
+            employee_service=self.employees,
         )
         dialog.exec()
         objects = self.directories.list_all("objects")

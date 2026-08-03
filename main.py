@@ -44,10 +44,40 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setStyleSheet(APP_STYLESHEET)
     settings = ConfigManager().load()
-    database = Database(Path(settings.prolog_database_path)) if settings.prolog_database_path else Database()
+    database = Database(
+        Path(settings.prolog_database_path) if settings.prolog_database_path else None,
+        employees_path=(
+            Path(settings.employees_database_path)
+            if settings.employees_database_path
+            else None
+        ),
+        objects_path=(
+            Path(settings.objects_database_path)
+            if settings.objects_database_path
+            else None
+        ),
+        products_path=(
+            Path(settings.products_database_path)
+            if settings.products_database_path
+            else None
+        ),
+        aliases_path=(
+            Path(settings.aliases_database_path)
+            if settings.aliases_database_path
+            else None
+        ),
+    )
     try:
-        if settings.prolog_database_path and not database.path.is_file():
-            raise FileNotFoundError("выбранный файл не найден")
+        configured_paths = {
+            "ядро ProLOG": settings.prolog_database_path,
+            "сотрудники": settings.employees_database_path,
+            "объекты": settings.objects_database_path,
+            "изделия": settings.products_database_path,
+            "алиасы": settings.aliases_database_path,
+        }
+        for label, configured_path in configured_paths.items():
+            if configured_path and not Path(configured_path).is_file():
+                raise FileNotFoundError(f"не найден файл компонента «{label}»: {configured_path}")
         database.initialize()
     except Exception as exc:
         logging.getLogger(__name__).exception("Failed to initialize ProLOG database")

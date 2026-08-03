@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -24,6 +25,13 @@ from integrations.workbot.service import WorkBotIntegrationService
 from models import Employee
 
 
+class NoWheelComboBox(QComboBox):
+    """Prevents accidental selection changes while the table is scrolled."""
+
+    def wheelEvent(self, event) -> None:
+        event.ignore()
+
+
 class WorkBotBindingsDialog(QDialog):
     def __init__(
         self,
@@ -34,7 +42,7 @@ class WorkBotBindingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Привязки пользователей WorkBot")
-        self.resize(1120, 640)
+        self.resize(1180, 640)
         self.service = service
         self.employees = sorted(employees, key=lambda item: item.full_name.casefold())
         self.links = service.list_user_links(source_path)
@@ -49,7 +57,7 @@ class WorkBotBindingsDialog(QDialog):
             ]
         )
         self.save_button = QPushButton("Сохранить привязки")
-        self.close_button = QPushButton("Закрыть")
+        self.close_button = QPushButton("Отмена")
         self._build_layout()
         self._fill_table()
         self.save_button.clicked.connect(self._save)
@@ -59,9 +67,9 @@ class WorkBotBindingsDialog(QDialog):
         title = QLabel("Привязка пользователей MAX к сотрудникам")
         title.setObjectName("DialogTitle")
         note = QLabel(
-            "Проверьте профиль MAX и выберите соответствующего сотрудника ProLOG. Публичная "
-            "ссылка на пользователя по числовому ID в MAX отсутствует; кнопка копирует точный ID. "
-            "Зеленые строки уже привязаны, красные требуют проверки."
+            "Проверьте профиль MAX и выберите соответствующего сотрудника ProLOG. Кнопка открытия "
+            "использует нативный протокол приложения MAX. Зеленые строки уже привязаны, "
+            "светлые строки требуют проверки, а измененные выделяются отдельно."
         )
         note.setWordWrap(True)
         buttons = QHBoxLayout()
@@ -82,12 +90,12 @@ class WorkBotBindingsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for column, width in enumerate((120, 230, 330, 210, 145)):
+        for column, width in enumerate((120, 230, 330, 220, 210)):
             self.table.setColumnWidth(column, width)
         for row_index, link in enumerate(self.links):
             self.table.setItem(row_index, 0, QTableWidgetItem(str(link.max_user_id)))
             self.table.setItem(row_index, 1, QTableWidgetItem(link.profile_name))
-            employee_combo = QComboBox()
+            employee_combo = NoWheelComboBox()
             employee_combo.addItem("Не привязан", None)
             for employee in self.employees:
                 employee_combo.addItem(employee.full_name, employee.id)
@@ -96,31 +104,43 @@ class WorkBotBindingsDialog(QDialog):
             state = QTableWidgetItem(link.match_message)
             state.setToolTip(link.match_message)
             self.table.setItem(row_index, 3, state)
-            open_button = QPushButton("Копировать ID")
-            open_button.setToolTip("Скопировать числовой MAX ID")
+            open_button = QPushButton("Открыть диалог в MAX")
+            open_button.setToolTip("Открыть пользователя в установленном приложении MAX")
             open_button.clicked.connect(
-                lambda _checked=False, user_id=link.max_user_id: self._copy_max_id(user_id)
+                lambda _checked=False, user_id=link.max_user_id: self._open_max_dialog(user_id)
             )
             self.table.setCellWidget(row_index, 4, open_button)
             employee_combo.currentIndexChanged.connect(
                 lambda _index, row=row_index: self._employee_changed(row)
             )
-            self._paint_row(row_index, employee_combo.currentData() is not None)
+            self._paint_row(row_index, employee_combo.currentData() is not None, False)
 
-    def _copy_max_id(self, user_id: int) -> None:
+    def _open_max_dialog(self, user_id: int) -> None:
         QApplication.clipboard().setText(str(user_id))
+        if QDesktopServices.openUrl(QUrl(f"max://user/{user_id}")):
+            return
+        self._message(
+            "Не удалось открыть приложение MAX. Числовой MAX ID скопирован в буфер обмена.",
+            QMessageBox.Icon.Warning,
+        )
 
     def _employee_changed(self, row_index: int) -> None:
         employee_combo = self.table.cellWidget(row_index, 2)
         employee_id = employee_combo.currentData()
         employee = next((item for item in self.employees if item.id == employee_id), None)
+        changed = employee_id != self.links[row_index].employee_id
         state = self.table.item(row_index, 3)
         if state:
-            state.setText("Будет привязан" if employee else "Не привязан")
-        self._paint_row(row_index, employee is not None)
+            if changed:
+                state.setText(
+                    "Изменено: будет привязан" if employee else "Изменено: привязка будет удалена"
+                )
+            else:
+                state.setText("Привязка сохранена" if employee else "Не привязан")
+        self._paint_row(row_index, employee is not None, changed)
 
-    def _paint_row(self, row_index: int, is_bound: bool) -> None:
-        color = QColor("#dff3e4" if is_bound else "#fde8e7")
+    def _paint_row(self, row_index: int, is_bound: bool, is_changed: bool) -> None:
+        color = QColor("#fff5d9" if is_changed else ("#edf7f0" if is_bound else "#fff6f4"))
         for column in range(self.table.columnCount()):
             item = self.table.item(row_index, column)
             if item is not None:

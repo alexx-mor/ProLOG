@@ -44,19 +44,30 @@ from PySide6.QtWidgets import (
 from config import ConfigManager
 from constants import APP_LOGO_FILE, APP_NAME, APP_VERSION, DATABASE_FILE, DIRECTORY_ICONS_DIR
 from database_registry import (
+    ALIASES_DATABASE,
+    DATABASE_KIND_LABELS,
+    EMPLOYEES_DATABASE,
+    OBJECTS_DATABASE,
     PROLOG_DATABASE,
+    PRODUCTS_DATABASE,
     WORKBOT_DATABASE,
     DatabaseRegistry,
     DatabaseSource,
 )
 from directory_files import dictionary_statuses, merge_dictionary_updates
 from category_rules import NO_CATEGORY, STUDENT_CATEGORY
-from models import DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
+from models import AliasItem, DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
 from services import category_values_from_rule
 from update_checker import UpdateChecker
 
 
 PAY_CATEGORY_COLUMNS = (STUDENT_CATEGORY, "1", "2", "3")
+ALIAS_TYPE_LABELS = {
+    "employee": "Сотрудник",
+    "object": "Объект",
+    "location": "Местонахождение",
+    "product": "Изделие",
+}
 MONTH_NAMES = (
     "Январь",
     "Февраль",
@@ -764,6 +775,78 @@ class PayRateDialog(QDialog):
         )
 
 
+class AliasDialog(QDialog):
+    def __init__(
+        self,
+        targets: dict[str, list[tuple[int, str]]],
+        alias: AliasItem | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.targets = targets
+        self.alias = alias
+        self.setWindowTitle("Алиас")
+        self.setFixedWidth(700)
+        self.alias_type = QComboBox()
+        for key, label in ALIAS_TYPE_LABELS.items():
+            self.alias_type.addItem(label, key)
+        self.original_alias = QLineEdit(alias.original_alias if alias else "")
+        self.target = QComboBox()
+        self.target.setView(QListView())
+        self.target.setMinimumWidth(440)
+        self.alias_type.currentIndexChanged.connect(self._fill_targets)
+        if alias:
+            index = self.alias_type.findData(alias.alias_type)
+            self.alias_type.setCurrentIndex(max(0, index))
+        self._fill_targets()
+        if alias:
+            index = self.target.findData(alias.target_id)
+            self.target.setCurrentIndex(max(0, index))
+        form = QFormLayout()
+        form.addRow("Тип", self.alias_type)
+        form.addRow("Написание в сообщении", self.original_alias)
+        form.addRow("Соответствует", self.target)
+        save_button = QPushButton("Сохранить")
+        cancel_button = QPushButton("Отмена")
+        save_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(save_button)
+        buttons.addWidget(cancel_button)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+        layout.addLayout(form)
+        layout.addLayout(buttons)
+
+    def value(self) -> AliasItem:
+        return AliasItem(
+            alias_type=str(self.alias_type.currentData() or ""),
+            original_alias=self.original_alias.text().strip(),
+            target_id=int(self.target.currentData()),
+            target_name=self.target.currentText(),
+        )
+
+    def accept(self) -> None:
+        if not self.original_alias.text().strip():
+            QMessageBox.warning(self, "Алиас", "Укажите написание из сообщения")
+            return
+        if self.target.currentData() is None:
+            QMessageBox.warning(self, "Алиас", "Выберите запись, которой соответствует алиас")
+            return
+        super().accept()
+
+    def _fill_targets(self) -> None:
+        current_id = self.target.currentData()
+        self.target.clear()
+        for item_id, name in self.targets.get(str(self.alias_type.currentData() or ""), []):
+            self.target.addItem(name, item_id)
+        index = self.target.findData(current_id)
+        if index >= 0:
+            self.target.setCurrentIndex(index)
+
+
 class DatabaseSourceDialog(QDialog):
     """Adds an existing ProLOG or WorkBot SQLite file to the registry."""
 
@@ -775,10 +858,15 @@ class DatabaseSourceDialog(QDialog):
         self.name = QLineEdit(source.name if source else "")
         self.kind = QComboBox()
         self.kind.addItem("База ProLOG", PROLOG_DATABASE)
+        self.kind.addItem("Сотрудники ProLOG", EMPLOYEES_DATABASE)
+        self.kind.addItem("Объекты ProLOG", OBJECTS_DATABASE)
+        self.kind.addItem("Изделия ProLOG", PRODUCTS_DATABASE)
+        self.kind.addItem("Алиасы ProLOG", ALIASES_DATABASE)
         self.kind.addItem("База WorkBot", WORKBOT_DATABASE)
         if source:
             index = self.kind.findData(source.kind)
             self.kind.setCurrentIndex(max(0, index))
+            self.kind.setEnabled(False)
         self.path = QLineEdit(source.path if source else "")
         self.path.setReadOnly(True)
         browse_button = QPushButton("Обзор")
@@ -846,6 +934,7 @@ class DirectoryDialog(QDialog):
         "pay_rates": "Оплата",
         "objects": "Объекты",
         "products": "Изделия",
+        "aliases": "Алиасы",
         "calendar": "Производственный календарь",
         "databases": "Базы данных",
     }
@@ -857,6 +946,7 @@ class DirectoryDialog(QDialog):
         "pay_rates": "Справочник оплаты",
         "objects": "Справочник объектов",
         "products": "Справочник изделий",
+        "aliases": "Справочник алиасов",
         "calendar": "Производственный календарь",
         "databases": "Справочник баз данных",
     }
@@ -872,15 +962,21 @@ class DirectoryDialog(QDialog):
         config_manager: ConfigManager | None = None,
         app_settings=None,
         current_database_path: Path | None = None,
+        current_database_paths: dict[str, Path] | None = None,
+        employee_service=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Справочники")
         self.resize(1320, 820)
         self.directory_service = directory_service
+        self.employee_service = employee_service
         self.database_registry = database_registry or DatabaseRegistry()
         self.config_manager = config_manager or ConfigManager()
         self.app_settings = app_settings or self.config_manager.load()
         self.current_database_path = current_database_path or DATABASE_FILE
+        self.current_database_paths = current_database_paths or {
+            PROLOG_DATABASE: self.current_database_path
+        }
         self._database_sources: list[DatabaseSource] = []
         self._database_statuses: dict[str, tuple[bool, str]] = {}
         self.directory_labels = dict(self.DIRECTORY_LABELS)
@@ -973,6 +1069,9 @@ class DirectoryDialog(QDialog):
             return
         if self.current_key == "databases":
             self._refresh_databases(needle)
+            return
+        if self.current_key == "aliases":
+            self._refresh_aliases(needle)
             return
         if self.current_key == "products":
             self._populate_product_object_filter()
@@ -1170,6 +1269,10 @@ class DirectoryDialog(QDialog):
         sources = self.database_registry.list(
             self.app_settings.prolog_database_path,
             self.app_settings.workbot_database_path,
+            self.app_settings.employees_database_path,
+            self.app_settings.objects_database_path,
+            self.app_settings.products_database_path,
+            self.app_settings.aliases_database_path,
         )
         self._database_sources = [
             item
@@ -1187,7 +1290,7 @@ class DirectoryDialog(QDialog):
             selected = self._database_selection_text(source)
             values = [
                 source.name,
-                "ProLOG" if source.kind == PROLOG_DATABASE else "WorkBot",
+                DATABASE_KIND_LABELS.get(source.kind, source.kind),
                 source.path,
                 status_text,
                 selected,
@@ -1200,13 +1303,48 @@ class DirectoryDialog(QDialog):
                     item.setForeground(QColor("#26834a" if available else "#b42318"))
                 self.table.setItem(row, column, item)
 
+    def _refresh_aliases(self, needle: str = "") -> None:
+        self._items = [
+            item
+            for item in self.directory_service.list_aliases()
+            if not needle
+            or needle in item.original_alias.casefold()
+            or needle in item.target_name.casefold()
+            or needle in ALIAS_TYPE_LABELS.get(item.alias_type, item.alias_type).casefold()
+        ]
+        self.table.setRowCount(len(self._items))
+        for row, alias in enumerate(self._items):
+            values = [
+                ALIAS_TYPE_LABELS.get(alias.alias_type, alias.alias_type),
+                alias.original_alias,
+                alias.target_name or f"ID {alias.target_id}",
+            ]
+            for column, value in enumerate(values):
+                cell = QTableWidgetItem(value)
+                cell.setToolTip(value)
+                cell.setData(
+                    Qt.ItemDataRole.UserRole,
+                    (alias.alias_type, alias.alias_normalized),
+                )
+                self.table.setItem(row, column, cell)
+
     def _database_selection_text(self, source: DatabaseSource) -> str:
         if source.kind == WORKBOT_DATABASE:
             return "Да" if _same_path(source.path, self.app_settings.workbot_database_path) else ""
-        configured = self.app_settings.prolog_database_path or str(DATABASE_FILE)
+        setting_name = {
+            PROLOG_DATABASE: "prolog_database_path",
+            EMPLOYEES_DATABASE: "employees_database_path",
+            OBJECTS_DATABASE: "objects_database_path",
+            PRODUCTS_DATABASE: "products_database_path",
+            ALIASES_DATABASE: "aliases_database_path",
+        }[source.kind]
+        configured = getattr(self.app_settings, setting_name) or str(
+            self.current_database_paths.get(source.kind, "")
+        )
         if not _same_path(source.path, configured):
             return ""
-        return "Да" if _same_path(source.path, str(self.current_database_path)) else "После перезапуска"
+        current_path = self.current_database_paths.get(source.kind)
+        return "Да" if current_path and _same_path(source.path, str(current_path)) else "После перезапуска"
 
     def _populate_product_object_filter(self) -> None:
         current_id = self.product_object_filter.currentData()
@@ -1398,6 +1536,9 @@ class DirectoryDialog(QDialog):
         return cell.data(Qt.ItemDataRole.UserRole)
 
     def _selected_name(self) -> str:
+        if self.current_key == "aliases":
+            item = self._selected_item()
+            return item.original_alias if item else ""
         if self.current_key == "databases":
             item = self._selected_item()
             return item.name if item else ""
@@ -1424,7 +1565,38 @@ class DirectoryDialog(QDialog):
             groups.append(current_group.strip())
         return groups
 
+    def _alias_targets(self) -> dict[str, list[tuple[int, str]]]:
+        employees = self.employee_service.list() if self.employee_service is not None else []
+        return {
+            "employee": [(item.id, item.full_name) for item in employees if item.id is not None],
+            "object": [
+                (item.id, item.name)
+                for item in self.directory_service.list_all("objects")
+                if item.id is not None
+            ],
+            "location": [
+                (item.id, item.name)
+                for item in self.directory_service.list_all("locations")
+                if item.id is not None
+            ],
+            "product": [
+                (item.id, f"{item.object_name} / {item.name}" if item.object_name else item.name)
+                for item in self.directory_service.list_products(active_only=False)
+                if item.id is not None
+            ],
+        }
+
     def _add_item(self) -> None:
+        if self.current_key == "aliases":
+            dialog = AliasDialog(self._alias_targets(), parent=self)
+            if dialog.exec():
+                try:
+                    self.directory_service.save_alias(dialog.value())
+                except ValueError as exc:
+                    self._info(str(exc))
+                    return
+                self.refresh()
+            return
         if self.current_key == "databases":
             dialog = DatabaseSourceDialog(parent=self)
             if dialog.exec():
@@ -1487,6 +1659,35 @@ class DirectoryDialog(QDialog):
         item_id = self._selected_id()
         if item_id is None:
             self._info("Выберите строку")
+            return
+        if self.current_key == "aliases":
+            alias = self._selected_item()
+            if alias is None:
+                return
+            dialog = AliasDialog(self._alias_targets(), alias, self)
+            if dialog.exec():
+                try:
+                    self.directory_service.save_alias(
+                        dialog.value(), alias.alias_type, alias.alias_normalized
+                    )
+                except ValueError as exc:
+                    self._info(str(exc))
+                    return
+                self.refresh()
+            return
+        if self.current_key == "databases":
+            source = self._selected_item()
+            if source is None:
+                return
+            dialog = DatabaseSourceDialog(source, self)
+            if dialog.exec():
+                try:
+                    self.database_registry.update(source.id, *dialog.values())
+                    self._database_statuses.pop(source.id, None)
+                except ValueError as exc:
+                    self._info(str(exc))
+                    return
+                self.refresh()
             return
         if self.current_key == "pay_rates":
             item = self._selected_item()
@@ -1558,20 +1759,6 @@ class DirectoryDialog(QDialog):
         if item_id is None:
             self._info("Выберите строку")
             return
-        if self.current_key == "databases":
-            source = self._selected_item()
-            if source is None:
-                return
-            dialog = DatabaseSourceDialog(source, self)
-            if dialog.exec():
-                try:
-                    self.database_registry.update(source.id, *dialog.values())
-                    self._database_statuses.pop(source.id, None)
-                except ValueError as exc:
-                    self._info(str(exc))
-                    return
-                self.refresh()
-            return
         if self.current_key == "products":
             self.directory_service.set_product_active(item_id, is_active)
             self.refresh()
@@ -1618,6 +1805,16 @@ class DirectoryDialog(QDialog):
             )
 
     def _delete_item(self) -> None:
+        if self.current_key == "aliases":
+            alias = self._selected_item()
+            if alias is None:
+                self._info("Выберите строку")
+                return
+            if not self._ask(f"Удалить алиас '{alias.original_alias}'?"):
+                return
+            self.directory_service.delete_alias(alias.alias_type, alias.alias_normalized)
+            self.refresh()
+            return
         if self.current_key == "databases":
             source = self._selected_item()
             if source is None:
@@ -1645,7 +1842,11 @@ class DirectoryDialog(QDialog):
                 return
             if not self._ask(f"Удалить изделие '{self._selected_name()}'?"):
                 return
-            self.directory_service.delete_product(item_id)
+            try:
+                self.directory_service.delete_product(item_id)
+            except ValueError as exc:
+                self._info(str(exc))
+                return
             self.refresh()
             return
         item_id = self._selected_id()
@@ -1699,15 +1900,26 @@ class DirectoryDialog(QDialog):
             return
         if source.kind == PROLOG_DATABASE:
             self.app_settings.prolog_database_path = source.path
-            result_message = (
-                "База ProLOG выбрана. Она будет подключена после перезапуска программы. "
-                "Для сетевого файла необходимы стабильное подключение и регулярные резервные копии."
-                if not _same_path(source.path, str(self.current_database_path))
-                else "Эта база ProLOG уже используется."
-            )
+        elif source.kind == EMPLOYEES_DATABASE:
+            self.app_settings.employees_database_path = source.path
+        elif source.kind == OBJECTS_DATABASE:
+            self.app_settings.objects_database_path = source.path
+        elif source.kind == PRODUCTS_DATABASE:
+            self.app_settings.products_database_path = source.path
+        elif source.kind == ALIASES_DATABASE:
+            self.app_settings.aliases_database_path = source.path
         else:
             self.app_settings.workbot_database_path = source.path
             result_message = "База WorkBot выбрана."
+        if source.kind != WORKBOT_DATABASE:
+            current_path = self.current_database_paths.get(source.kind)
+            result_message = (
+                f"Компонент «{DATABASE_KIND_LABELS[source.kind]}» выбран и будет подключен после "
+                "перезапуска программы. Для сетевого файла необходимы стабильное подключение и "
+                "регулярные резервные копии."
+                if not current_path or not _same_path(source.path, str(current_path))
+                else "Эта база уже используется."
+            )
         self.config_manager.save(self.app_settings)
         self.refresh()
         self._select_row_by_id(source.id)
@@ -1743,15 +1955,25 @@ class DirectoryDialog(QDialog):
             check_action = QAction("Проверить", self)
             for action in (rename_action, delete_action, use_action, check_action):
                 action.setEnabled(has_item)
-            add_action.triggered.connect(self._add_item)
             rename_action.triggered.connect(self._rename_item)
             delete_action.triggered.connect(self._delete_item)
             use_action.triggered.connect(self._use_selected_database)
             check_action.triggered.connect(self._check_selected_database)
-            menu.addAction(add_action)
             menu.addAction(rename_action)
             menu.addAction(use_action)
             menu.addAction(check_action)
+            menu.addSeparator()
+            menu.addAction(delete_action)
+            menu.exec(self.table.viewport().mapToGlobal(position))
+            return
+        if self.current_key == "aliases":
+            for action in (rename_action, delete_action):
+                action.setEnabled(has_item)
+            add_action.triggered.connect(self._add_item)
+            rename_action.triggered.connect(self._rename_item)
+            delete_action.triggered.connect(self._delete_item)
+            menu.addAction(add_action)
+            menu.addAction(rename_action)
             menu.addSeparator()
             menu.addAction(delete_action)
             menu.exec(self.table.viewport().mapToGlobal(position))
@@ -1893,15 +2115,25 @@ class DirectoryDialog(QDialog):
             self.table.setHorizontalHeaderLabels(
                 ["Название", "Назначение", "Расположение", "Состояние", "Используется"]
             )
-            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-            self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+            for column in range(5):
+                self.table.horizontalHeader().setSectionResizeMode(
+                    column, QHeaderView.ResizeMode.Interactive
+                )
             self.table.setColumnWidth(0, 220)
-            self.table.setColumnWidth(1, 110)
-            self.table.setColumnWidth(3, 205)
-            self.table.setColumnWidth(4, 150)
+            self.table.setColumnWidth(1, 170)
+            self.table.setColumnWidth(2, 520)
+            self.table.setColumnWidth(3, 220)
+            self.table.setColumnWidth(4, 160)
+        elif self.current_key == "aliases":
+            self.table.setColumnCount(3)
+            self.table.setHorizontalHeaderLabels(["Тип", "Алиас", "Соответствует"])
+            for column in range(3):
+                self.table.horizontalHeader().setSectionResizeMode(
+                    column, QHeaderView.ResizeMode.Interactive
+                )
+            self.table.setColumnWidth(0, 180)
+            self.table.setColumnWidth(1, 360)
+            self.table.setColumnWidth(2, 480)
         elif self.current_key == "employee_groups":
             self.table.setColumnCount(2)
             self.table.setHorizontalHeaderLabels(["Блок/Группа", "Статус"])
@@ -1944,15 +2176,22 @@ class DirectoryDialog(QDialog):
         is_calendar = self.current_key == "calendar"
         is_products = self.current_key == "products"
         is_databases = self.current_key == "databases"
+        is_aliases = self.current_key == "aliases"
         self.search.setVisible(not is_calendar)
-        self.show_inactive.setVisible(not is_pay_rates and not is_calendar and not is_databases)
+        self.show_inactive.setVisible(
+            not is_pay_rates and not is_calendar and not is_databases and not is_aliases
+        )
         self.table.setVisible(not is_calendar)
         self.calendar_panel.setVisible(is_calendar)
         self.product_filter_panel.setVisible(is_products)
-        self.add_button.setVisible(not is_pay_rates and not is_calendar)
+        self.add_button.setVisible(not is_pay_rates and not is_calendar and not is_databases)
         self.rename_button.setVisible(not is_calendar)
-        self.disable_button.setVisible(not is_pay_rates and not is_calendar and not is_databases)
-        self.restore_button.setVisible(not is_pay_rates and not is_calendar and not is_databases)
+        self.disable_button.setVisible(
+            not is_pay_rates and not is_calendar and not is_databases and not is_aliases
+        )
+        self.restore_button.setVisible(
+            not is_pay_rates and not is_calendar and not is_databases and not is_aliases
+        )
         self.delete_button.setVisible(not is_pay_rates and not is_calendar)
         is_ordered = self.current_key in {"objects", "products"}
         self.move_up_button.setVisible(is_ordered)
@@ -2039,6 +2278,7 @@ def _directory_icon(key: str) -> QIcon:
         "objects": "#3d6f9f",
         "products": "#6c7a2f",
         "calendar": "#8a4b6f",
+        "aliases": "#477a69",
         "databases": "#4f6475",
     }
     pixmap = QPixmap(24, 24)
@@ -2078,6 +2318,10 @@ def _directory_icon(key: str) -> QIcon:
         painter.drawRect(6, 7, 12, 9)
         painter.drawArc(6, 13, 12, 5, 0, -180 * 16)
         painter.drawLine(9, 10, 15, 10)
+    elif key == "aliases":
+        painter.drawEllipse(5, 8, 7, 7)
+        painter.drawEllipse(12, 8, 7, 7)
+        painter.drawLine(10, 11, 14, 11)
     elif key == "objects":
         painter.drawRect(6, 6, 12, 12)
         for x in (9, 12, 15):

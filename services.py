@@ -10,7 +10,7 @@ from category_rules import STUDENT_CATEGORY, category_values_from_rule, normaliz
 from directory_files import load_position_category_map
 from database import DirectoryRepository, EmployeeRepository, WorkLogRepository
 from hours import normalize_hours
-from models import Employee, ProductItem, WorkCalendarDay, WorkLogEntry
+from models import AliasItem, Employee, ProductItem, WorkCalendarDay, WorkLogEntry
 from production_calendar import API_NOTE_PREFIX, IsDayOffCalendarProvider
 
 
@@ -163,6 +163,20 @@ class DirectoryService:
 
     def apply_department_defaults(self, department: str) -> None:
         self.repository.apply_department_defaults(department)
+
+    def list_aliases(self) -> list[AliasItem]:
+        return self.repository.list_aliases()
+
+    def save_alias(
+        self,
+        alias: AliasItem,
+        previous_type: str = "",
+        previous_normalized: str = "",
+    ) -> None:
+        self.repository.save_alias(alias, previous_type, previous_normalized)
+
+    def delete_alias(self, alias_type: str, alias_normalized: str) -> None:
+        self.repository.delete_alias(alias_type, alias_normalized)
 
 
 class EmployeeService:
