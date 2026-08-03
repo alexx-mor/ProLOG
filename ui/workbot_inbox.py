@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QFileDialog,
+    QFrame,
     QFormLayout,
     QHBoxLayout,
     QHeaderView,
@@ -20,6 +21,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -101,6 +104,9 @@ class WorkBotInboxWidget(QWidget):
         self.description.setMaximumHeight(240)
         self.issue = QLabel()
         self.issue.setWordWrap(True)
+        self.issue.setMinimumHeight(44)
+        self.issue.setMaximumHeight(72)
+        self.issue.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.issue.setStyleSheet("color: #a63b2b;")
         self.source_text = QTextEdit()
         self.source_text.setReadOnly(True)
@@ -137,6 +143,7 @@ class WorkBotInboxWidget(QWidget):
         left_layout.addWidget(self.table)
 
         editor = QWidget()
+        editor.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         form = QFormLayout(editor)
         form.setContentsMargins(12, 0, 0, 0)
         form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
@@ -150,9 +157,16 @@ class WorkBotInboxWidget(QWidget):
         form.addRow("Обозначение в сообщении", self.product_reference)
         form.addRow("Вид работ", self.work_type)
         form.addRow("Часы", self.hours)
-        form.addRow("Описание работ", self.description)
-        form.addRow("Проверка", self.issue)
-        form.addRow("Исходное сообщение", self.source_text)
+        description_label = QLabel("Описание работ")
+        description_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.issue_label = QLabel("Проверка")
+        self.issue_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        source_label = QLabel("Исходное сообщение")
+        source_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.issue.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form.addRow(description_label, self.description)
+        form.addRow(self.issue_label, self.issue)
+        form.addRow(source_label, self.source_text)
         form.addRow("", self.remember)
         buttons = QHBoxLayout()
         buttons.addWidget(self.import_button)
@@ -160,9 +174,21 @@ class WorkBotInboxWidget(QWidget):
         buttons.addStretch()
         form.addRow("", buttons)
 
+        editor_host = QWidget()
+        editor_host_layout = QVBoxLayout(editor_host)
+        editor_host_layout.setContentsMargins(0, 0, 0, 0)
+        editor_host_layout.addWidget(editor, 0, Qt.AlignmentFlag.AlignTop)
+        editor_host_layout.addStretch()
+        editor_scroll = QScrollArea()
+        editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        editor_scroll.setWidgetResizable(True)
+        editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        editor_scroll.setMaximumWidth(860)
+        editor_scroll.setWidget(editor_host)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(left)
-        splitter.addWidget(editor)
+        splitter.addWidget(editor_scroll)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
         splitter.setSizes([760, 500])
@@ -233,7 +259,12 @@ class WorkBotInboxWidget(QWidget):
                 self._product_name(row.product_id, row.product_text),
                 self._directory_name(row.location_id, row.location_text, self.locations),
                 format_hours(row.hours),
-                {"strict": "MAX", "historical": "История", "unparsed": "Ошибка"}.get(
+                {
+                    "strict": "MAX",
+                    "segmented": "MAX, пункт",
+                    "historical": "История",
+                    "unparsed": "Ошибка",
+                }.get(
                     row.source_kind, row.source_kind
                 ),
                 row.revision,

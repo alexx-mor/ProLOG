@@ -1,5 +1,35 @@
 ﻿# Changelog
 
+## 2026-08-03 - Multi-object WorkBot reports and month filters
+
+### Added
+
+- Added deterministic splitting of one numbered MAX message into independent
+  incoming rows when each work item contains its own hours.
+- Each split row now resolves its object, product and work type only from its own
+  source fragment, preventing cross-object and cross-product conflicts.
+- Added editable work-type aliases. Phrases such as `сборка шкафа №2356` can now
+  select the `Сборка шкафа` directory item automatically.
+- Added a shared `Месяц и год` period mode to report viewing and analytics.
+- Added database and alias icons extracted from the supplied `icons_modules_1.png`.
+
+### Fixed
+
+- Restored the supported browser route
+  `https://web.max.ru/:push?userId=<MAX_ID>` for opening a MAX dialog.
+- Product codes and aliases are matched case-insensitively, including `ШУ3` and `шу3`.
+- Pinned the incoming-report editor to the top at 4K resolutions and fixed the
+  vertical alignment and runaway height of the `Проверка` status.
+- Bumped the application and Windows executable version to `0.5.1`.
+
+### Verified
+
+- All project tests pass: `28 passed`.
+- Covered a two-object message with independent 5-hour and 3-hour work items,
+  product matching, work-type aliases, leap-year month ranges and 4K geometry.
+- Read-only scan of the current WorkBot database found 1,800 rows and no duplicate
+  `(message ID, source index)` keys.
+
 ## 2026-08-03 - Component databases and editable aliases
 
 ### Added

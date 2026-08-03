@@ -327,6 +327,14 @@ class WorkBotRepository:
                 self._remember_alias(connection, "aliases_db.LocationAliases", "location_id", row["location_text"], entry.location_id, now)
                 self._remember_alias(
                     connection,
+                    "aliases_db.WorkTypeAliases",
+                    "work_type_id",
+                    row["work_types"],
+                    entry.work_type_id,
+                    now,
+                )
+                self._remember_alias(
+                    connection,
                     "aliases_db.ProductAliases",
                     "product_id",
                     product_alias_text or row["product_text"],
@@ -402,6 +410,7 @@ ALIAS_TABLES = {
     "employee": ("aliases_db.EmployeeAliases", "employee_id"),
     "object": ("aliases_db.ObjectAliases", "object_id"),
     "location": ("aliases_db.LocationAliases", "location_id"),
+    "work_type": ("aliases_db.WorkTypeAliases", "work_type_id"),
     "product": ("aliases_db.ProductAliases", "product_id"),
 }
 

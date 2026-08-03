@@ -146,8 +146,9 @@ CREATE TABLE aliases_db.ObjectAliases (
 таблица `Objects` ProLOG. WorkBot или импортный шлюз получает активные объекты
 оттуда, а `ObjectAliases` хранит только варианты написания.
 
-По тому же принципу можно добавить `LocationAliases` и, при необходимости,
-`WorkTypeAliases`.
+По тому же принципу реализованы `LocationAliases`, `WorkTypeAliases` и
+`ProductAliases`. Алиас вида работ может быть короткой устойчивой фразой внутри
+более длинного описания, например `сборка шкафа`.
 
 ### `WorkBotImportRows`
 

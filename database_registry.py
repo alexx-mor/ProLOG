@@ -35,7 +35,13 @@ _REQUIRED_TABLES = {
     EMPLOYEES_DATABASE: {"Employees"},
     OBJECTS_DATABASE: {"Objects"},
     PRODUCTS_DATABASE: {"Products"},
-    ALIASES_DATABASE: {"EmployeeAliases", "ObjectAliases", "LocationAliases", "ProductAliases"},
+    ALIASES_DATABASE: {
+        "EmployeeAliases",
+        "ObjectAliases",
+        "LocationAliases",
+        "WorkTypeAliases",
+        "ProductAliases",
+    },
 }
 
 DATABASE_KIND_LABELS = {

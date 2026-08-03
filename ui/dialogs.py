@@ -66,6 +66,7 @@ ALIAS_TYPE_LABELS = {
     "employee": "Сотрудник",
     "object": "Объект",
     "location": "Местонахождение",
+    "work_type": "Вид работ",
     "product": "Изделие",
 }
 MONTH_NAMES = (
@@ -1577,6 +1578,11 @@ class DirectoryDialog(QDialog):
             "location": [
                 (item.id, item.name)
                 for item in self.directory_service.list_all("locations")
+                if item.id is not None
+            ],
+            "work_type": [
+                (item.id, item.name)
+                for item in self.directory_service.list_all("work_types")
                 if item.id is not None
             ],
             "product": [

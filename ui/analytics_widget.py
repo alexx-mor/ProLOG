@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
-from PySide6.QtCore import QDate, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFormLayout,
     QGridLayout,
@@ -26,7 +25,7 @@ from PySide6.QtWidgets import (
 from analytics import AnalyticsResult, format_money
 from hours import format_hours
 from models import DirectoryItem, Employee, ProductItem
-from ui.worklog_widget import CalendarDateEdit
+from ui.period_filter import PeriodFilterWidget
 
 
 class AnalyticsWidget(QWidget):
@@ -40,10 +39,7 @@ class AnalyticsWidget(QWidget):
         self.employee = QComboBox()
         self.object = QComboBox()
         self.product = QComboBox()
-        self.date_from_enabled = QCheckBox("С даты")
-        self.date_to_enabled = QCheckBox("По дату")
-        self.date_from = CalendarDateEdit(QDate.currentDate())
-        self.date_to = CalendarDateEdit(QDate.currentDate())
+        self.period = PeriodFilterWidget()
         self.apply_button = QPushButton("Рассчитать")
         self.clear_button = QPushButton("Сбросить")
         self.summary_labels = {
@@ -100,10 +96,10 @@ class AnalyticsWidget(QWidget):
         return self.product.currentData()
 
     def date_from_value(self) -> date | None:
-        return self.date_from.date().toPython() if self.date_from_enabled.isChecked() else None
+        return self.period.date_from_value()
 
     def date_to_value(self) -> date | None:
-        return self.date_to.date().toPython() if self.date_to_enabled.isChecked() else None
+        return self.period.date_to_value()
 
     def set_result(self, result: AnalyticsResult) -> None:
         self.summary_labels["employees"].setText(str(result.summary.employees_count))
@@ -120,11 +116,6 @@ class AnalyticsWidget(QWidget):
     def _setup_controls(self) -> None:
         for combo in (self.employee, self.object, self.product):
             combo.setView(QListView())
-        for date_edit in (self.date_from, self.date_to):
-            date_edit.setCalendarPopup(True)
-            date_edit.setDisplayFormat("dd.MM.yyyy")
-            date_edit.lineEdit().setReadOnly(True)
-            date_edit.setEnabled(False)
         self.object_table.setHorizontalHeaderLabels(
             ["Объект", "Сотрудников", "Записей", "Часы", "Чел.-часы", "Зарплата"]
         )
@@ -149,12 +140,7 @@ class AnalyticsWidget(QWidget):
         form.addRow("Сотрудник", self.employee)
         form.addRow("Объект", self.object)
         form.addRow("Изделие", self.product)
-        date_grid = QGridLayout()
-        date_grid.addWidget(self.date_from_enabled, 0, 0)
-        date_grid.addWidget(self.date_from, 0, 1)
-        date_grid.addWidget(self.date_to_enabled, 1, 0)
-        date_grid.addWidget(self.date_to, 1, 1)
-        form.addRow("Период", date_grid)
+        form.addRow("Период", self.period)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.apply_button)
@@ -197,8 +183,6 @@ class AnalyticsWidget(QWidget):
     def _connect(self) -> None:
         self.apply_button.clicked.connect(self.filters_changed)
         self.clear_button.clicked.connect(self._clear_filters)
-        self.date_from_enabled.toggled.connect(self.date_from.setEnabled)
-        self.date_to_enabled.toggled.connect(self.date_to.setEnabled)
         self.employee.currentIndexChanged.connect(lambda _index: self.filters_changed.emit())
         self.object.currentIndexChanged.connect(self._object_filter_changed)
         self.product.currentIndexChanged.connect(lambda _index: self.filters_changed.emit())
@@ -207,8 +191,7 @@ class AnalyticsWidget(QWidget):
         self.employee.setCurrentIndex(0)
         self.object.setCurrentIndex(0)
         self.product.setCurrentIndex(0)
-        self.date_from_enabled.setChecked(False)
-        self.date_to_enabled.setChecked(False)
+        self.period.clear()
         self.filters_changed.emit()
 
     def _fill_object_table(self, result: AnalyticsResult) -> None:

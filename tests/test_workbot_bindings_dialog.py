@@ -19,7 +19,7 @@ class _FakeService:
         ]
 
 
-def test_action_button_opens_native_max_dialog() -> None:
+def test_action_button_opens_max_web_dialog() -> None:
     app = QApplication.instance() or QApplication([])
     dialog = WorkBotBindingsDialog(_FakeService(), Path("workbot.sqlite3"), [])
     button = dialog.table.cellWidget(0, 4)
@@ -29,7 +29,9 @@ def test_action_button_opens_native_max_dialog() -> None:
     with patch("ui.workbot_bindings_dialog.QDesktopServices.openUrl", return_value=True) as open_url:
         button.click()
 
-    assert open_url.call_args.args[0].toString() == "max://user/123456789"
+    assert open_url.call_args.args[0].toString() == (
+        "https://web.max.ru/:push?userId=123456789"
+    )
     dialog.close()
     app.processEvents()
 

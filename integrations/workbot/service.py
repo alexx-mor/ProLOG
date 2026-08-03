@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from hours import normalize_hours
 from integrations.workbot.matcher import detect_product
@@ -55,7 +56,7 @@ class WorkBotIntegrationService:
         bindings = self.repository.employee_bindings()
         aliases = {
             alias_type: self.repository.alias_targets(alias_type)
-            for alias_type in ("employee", "object", "location", "product")
+            for alias_type in ("employee", "object", "location", "work_type", "product")
         }
         for candidate in candidates:
             self._resolve(candidate, employees, objects, locations, work_types, products, bindings, aliases)
@@ -165,12 +166,34 @@ class WorkBotIntegrationService:
             return
         candidate.employee_id = self._employee_id(candidate, employees, bindings, aliases["employee"])
         candidate.object_id = self._directory_id(candidate.object_text, objects, aliases["object"])
+        if candidate.object_id is None:
+            candidate.object_id = _mentioned_id(
+                candidate.source_fragment or candidate.raw_text,
+                objects,
+                aliases["object"],
+            )
+            matched_object = _by_id(objects, candidate.object_id)
+            if matched_object is not None and not candidate.object_text:
+                candidate.object_text = matched_object.name
         candidate.location_id = self._directory_id(candidate.location_text, locations, aliases["location"])
-        candidate.work_type_id = _exact_id(candidate.work_types, work_types)
+        candidate.work_type_id = self._directory_id(
+            candidate.work_types,
+            work_types,
+            aliases["work_type"],
+        )
+        if candidate.work_type_id is None:
+            candidate.work_type_id = _mentioned_id(
+                candidate.work_types or candidate.source_fragment,
+                work_types,
+                aliases["work_type"],
+            )
+        product_sources = [candidate.source_fragment, candidate.work_types]
+        if candidate.source_kind != "segmented":
+            product_sources.append(candidate.raw_text)
         product_match = detect_product(
             "\n".join(
                 value
-                for value in (candidate.raw_text, candidate.source_fragment, candidate.work_types)
+                for value in product_sources
                 if value
             ),
             products,
@@ -196,7 +219,8 @@ class WorkBotIntegrationService:
             candidate.status = STATUS_NEEDS_LOCATION
             candidate.error_message = "Сопоставьте местонахождение"
             return
-        is_non_work = candidate.location_text in NON_WORK_LOCATIONS
+        location = _by_id(locations, candidate.location_id)
+        is_non_work = bool(location and location.name in NON_WORK_LOCATIONS)
         if candidate.object_text and candidate.object_id is None and not is_non_work:
             candidate.status = STATUS_NEEDS_OBJECT
             candidate.error_message = "Сопоставьте объект или добавьте подтвержденный алиас"
@@ -244,6 +268,36 @@ def _exact_id(value: str, items, name_attr: str = "name") -> int | None:
         if normalize_alias(str(getattr(item, name_attr))) == key:
             return item.id
     return None
+
+
+def _mentioned_id(value: str, items, aliases: dict[str, int]) -> int | None:
+    normalized = normalize_alias(value)
+    if not normalized:
+        return None
+    references: list[tuple[int, int]] = []
+    for item in items:
+        if item.id is not None and _contains_reference(normalized, str(item.name)):
+            references.append((len(_compact_reference(item.name)), int(item.id)))
+    for alias, item_id in aliases.items():
+        if _contains_reference(normalized, alias):
+            references.append((len(_compact_reference(alias)), item_id))
+    if not references:
+        return None
+    best_score = max(score for score, _item_id in references)
+    best_ids = {item_id for score, item_id in references if score == best_score}
+    return next(iter(best_ids)) if len(best_ids) == 1 else None
+
+
+def _contains_reference(normalized_text: str, reference: str) -> bool:
+    tokens = re.findall(r"[0-9a-zа-я]+", normalize_alias(reference))
+    if not tokens:
+        return False
+    body = r"[^0-9a-zа-я]*".join(re.escape(token) for token in tokens)
+    return re.search(rf"(?<![0-9a-zа-я]){body}(?![0-9a-zа-я])", normalized_text) is not None
+
+
+def _compact_reference(value: str) -> str:
+    return re.sub(r"[^0-9a-zа-я]+", "", normalize_alias(value))
 
 
 def _by_id(items, item_id: int | None):

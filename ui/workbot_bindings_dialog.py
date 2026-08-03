@@ -117,10 +117,10 @@ class WorkBotBindingsDialog(QDialog):
 
     def _open_max_dialog(self, user_id: int) -> None:
         QApplication.clipboard().setText(str(user_id))
-        if QDesktopServices.openUrl(QUrl(f"max://user/{user_id}")):
+        if QDesktopServices.openUrl(QUrl(f"https://web.max.ru/:push?userId={user_id}")):
             return
         self._message(
-            "Не удалось открыть приложение MAX. Числовой MAX ID скопирован в буфер обмена.",
+            "Не удалось открыть MAX в браузере. Числовой MAX ID скопирован в буфер обмена.",
             QMessageBox.Icon.Warning,
         )
 

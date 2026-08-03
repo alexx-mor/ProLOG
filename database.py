@@ -64,6 +64,7 @@ ALIAS_DEFINITIONS = {
     "employee": ("EmployeeAliases", "employee_id", EMPLOYEES_TABLE, "full_name"),
     "object": ("ObjectAliases", "object_id", OBJECTS_TABLE, "name"),
     "location": ("LocationAliases", "location_id", "Locations", "name"),
+    "work_type": ("WorkTypeAliases", "work_type_id", "WorkTypes", "name"),
     "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
 }
 
@@ -170,6 +171,10 @@ class Database:
                 "aliases_db.LocationAliases",
                 "alias_normalized, original_alias, location_id, created_at, updated_at",
             ),
+            "WorkTypeAliases": (
+                "aliases_db.WorkTypeAliases",
+                "alias_normalized, original_alias, work_type_id, created_at, updated_at",
+            ),
             "ProductAliases": (
                 "aliases_db.ProductAliases",
                 "alias_normalized, original_alias, product_id, created_at, updated_at",
@@ -189,6 +194,7 @@ class Database:
             "ObjectAliases",
             "EmployeeAliases",
             "LocationAliases",
+            "WorkTypeAliases",
             "Products",
             "Objects",
             "Employees",
@@ -1229,6 +1235,11 @@ class DirectoryRepository:
                         "DELETE FROM aliases_db.LocationAliases WHERE location_id = ?",
                         (item_id,),
                     )
+                if table_key == "work_types":
+                    connection.execute(
+                        "DELETE FROM aliases_db.WorkTypeAliases WHERE work_type_id = ?",
+                        (item_id,),
+                    )
                 connection.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
         except ValueError:
             raise
@@ -1761,6 +1772,14 @@ CREATE TABLE IF NOT EXISTS aliases_db.LocationAliases (
     alias_normalized TEXT PRIMARY KEY,
     original_alias TEXT NOT NULL,
     location_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS aliases_db.WorkTypeAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    work_type_id INTEGER NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

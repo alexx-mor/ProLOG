@@ -15,7 +15,7 @@ from integrations.workbot.models import WorkBotUserLink
 from integrations.workbot.matcher import detect_product
 from integrations.workbot.repository import WorkBotRepository
 from integrations.workbot.service import WorkBotIntegrationService
-from models import Employee, ProductItem
+from models import AliasItem, Employee, ProductItem
 from services import DirectoryService, EmployeeService, WorkLogService, normalize_mobile_phone
 
 
@@ -39,6 +39,63 @@ def test_product_is_detected_by_code() -> None:
         [ProductItem(id=12, object_id=4, name="Шкаф 1", code="ШУ-1")],
     )
     assert short_code.product_id is None
+    lower_case = detect_product(
+        "сборка и маркировка шу3",
+        [ProductItem(id=13, object_id=4, name="Шкаф 3", code="ШУ3")],
+    )
+    assert lower_case.product_id == 13
+
+
+def test_numbered_message_is_split_by_object_and_hours(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("DELETE FROM reports")
+        connection.execute(
+            """
+            UPDATE messages
+            SET raw_text = ?, parse_status = 'invalid', parse_error = 'Свободная форма'
+            WHERE max_message_id = 'message-1'
+            """,
+            (
+                "Микулицкая Е.А\n"
+                "Газетная 23 с8:00-17:00\n"
+                "1) Сборка шкафа Жигалово ШУ2 N3076 (5часов)\n"
+                "2) Установка контакторов и подключение их УНР ШУФ 9 (3часа)",
+            ),
+        )
+    service, _worklogs, _employee_id, _location_id, object_id, _work_type_id, _product_id = (
+        _create_prolog(tmp_path)
+    )
+    directories = service.directories
+    assembly_id = directories.ensure("work_types", "Сборка шкафа")
+    connection_id = directories.ensure("work_types", "Подключение")
+    unr_id = directories.ensure("objects", "УНР")
+    first_product_id = directories.save_product(
+        ProductItem(object_id=object_id, name="ШУ2", serial_number="3076", code="ШУ2")
+    )
+    second_product_id = directories.save_product(
+        ProductItem(object_id=unr_id, name="ШУФ 9", code="ШУФ 9")
+    )
+    directories.save_alias(
+        AliasItem(
+            "work_type",
+            "Установка контакторов и подключение их",
+            connection_id,
+        )
+    )
+
+    result = service.sync(source_path)
+    rows = sorted(service.list_rows(), key=lambda item: item.source_index)
+
+    assert result.added_rows == 2
+    assert [row.source_kind for row in rows] == ["segmented", "segmented"]
+    assert [row.hours for row in rows] == [5.0, 3.0]
+    assert [row.object_id for row in rows] == [object_id, unr_id]
+    assert [row.product_id for row in rows] == [first_product_id, second_product_id]
+    assert [row.work_type_id for row in rows] == [assembly_id, connection_id]
+    assert "Жигалово" in rows[0].source_fragment
+    assert "УНР" in rows[1].source_fragment
 
 
 def test_workbot_sync_is_idempotent_and_preserves_revisions(tmp_path: Path) -> None:

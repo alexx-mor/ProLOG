@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from collections import defaultdict
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -27,7 +29,11 @@ class WorkBotSource:
             raise ValueError(f"Не удалось прочитать базу WorkBot: {exc}") from exc
         finally:
             connection.close()
-        candidates = [self._map(row) for row in rows]
+        candidates = [
+            expanded
+            for row in rows
+            for expanded in _expand_numbered_items(self._map(row))
+        ]
         self._assign_message_hashes(candidates)
         return candidates
 
@@ -128,6 +134,55 @@ class WorkBotSource:
             ).hexdigest()
             for row in rows:
                 row.content_hash = content_hash
+
+
+_NUMBERED_ITEM_RE = re.compile(r"^\s*\d{1,2}\s*[.)]\s*(?P<body>.+?)\s*$")
+_ITEM_HOURS_RE = re.compile(
+    r"\s*[([]?\s*(?P<hours>\d{1,2}(?:[.,]\d+)?)\s*"
+    r"(?:ч(?:ас(?:а|ов)?)?\.?|час(?:а|ов)?)\s*[)\]]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _expand_numbered_items(candidate: WorkBotCandidate) -> list[WorkBotCandidate]:
+    if (
+        candidate.source_kind == "historical"
+        and candidate.source_fragment.strip() != candidate.raw_text.strip()
+    ):
+        return [candidate]
+    items: list[tuple[str, float]] = []
+    for line in candidate.raw_text.replace("\r", "").splitlines():
+        item_match = _NUMBERED_ITEM_RE.match(line)
+        if item_match is None:
+            continue
+        body = item_match.group("body").strip()
+        hours_match = _ITEM_HOURS_RE.search(body)
+        hours = normalize_hours(hours_match.group("hours")) if hours_match else 0.0
+        description = _ITEM_HOURS_RE.sub("", body).strip(" .,:;-")
+        if description:
+            items.append((description, hours))
+    if len(items) < 2:
+        return [candidate]
+    return [
+        replace(
+            candidate,
+            source_index=index,
+            source_kind="segmented",
+            work_types=description,
+            hours=hours,
+            object_text="",
+            source_fragment=description,
+            product_text="",
+            content_hash="",
+            employee_id=None,
+            object_id=None,
+            location_id=None,
+            work_type_id=None,
+            product_id=None,
+            error_message="",
+        )
+        for index, (description, hours) in enumerate(items)
+    ]
 
 
 SOURCE_QUERY = """

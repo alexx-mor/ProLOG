@@ -64,7 +64,9 @@ def test_legacy_component_rows_move_without_changing_ids(tmp_path: Path) -> None
 
     repository = DirectoryRepository(database)
     repository.save_alias(AliasItem("product", "ШУ 31", 31))
+    repository.save_alias(AliasItem("work_type", "сборка шкафа №", 5))
     assert any(item.original_alias == "ШУ 31" for item in repository.list_aliases())
+    assert any(item.alias_type == "work_type" for item in repository.list_aliases())
     repository.delete_alias("product", "шу 31")
     assert all(item.original_alias != "ШУ 31" for item in repository.list_aliases())
 
