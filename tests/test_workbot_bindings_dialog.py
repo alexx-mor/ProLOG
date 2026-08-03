@@ -20,7 +20,7 @@ class _FakeService:
         ]
 
 
-def test_open_button_uses_max_user_deep_link() -> None:
+def test_open_button_uses_max_web_user_link() -> None:
     app = QApplication.instance() or QApplication([])
     dialog = WorkBotBindingsDialog(_FakeService(), Path("workbot.sqlite3"), [])
     button = dialog.table.cellWidget(0, 7)
@@ -31,6 +31,6 @@ def test_open_button_uses_max_user_deep_link() -> None:
         button.click()
 
     assert open_url.call_count == 1
-    assert open_url.call_args.args[0].toString() == "max://user/123456789"
+    assert open_url.call_args.args[0].toString() == "https://web.max.ru/:push?userId=123456789"
     dialog.close()
     app.processEvents()

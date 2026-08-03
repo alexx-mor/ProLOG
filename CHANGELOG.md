@@ -1,5 +1,21 @@
 ﻿# Changelog
 
+## 2026-08-03 - Open MAX users in the browser
+
+### Fixed
+
+- Replaced the unregistered Windows protocol `max://` with the web-client route
+  `https://web.max.ru/:push?userId=<MAX_ID>` designed to resolve a numeric user ID
+  to a dialog.
+- The `Открыть` button now launches the default browser and no longer opens the
+  Windows application-selection dialog.
+- Bumped the application and Windows executable version to `0.3.3`.
+
+### Verified
+
+- All project tests pass: `24 passed`.
+- The Qt test confirms that the exact web.max.ru numeric-user route is opened.
+
 ## 2026-08-03 - Open MAX user from ProLOG
 
 ### Added

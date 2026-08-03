@@ -25,6 +25,9 @@ from integrations.workbot.service import WorkBotIntegrationService
 from models import Employee
 
 
+MAX_WEB_USER_URL = "https://web.max.ru/:push?userId={user_id}"
+
+
 class WorkBotBindingsDialog(QDialog):
     def __init__(
         self,
@@ -110,7 +113,7 @@ class WorkBotBindingsDialog(QDialog):
             state.setToolTip(link.match_message)
             self.table.setItem(row_index, 6, state)
             open_button = QPushButton("Открыть")
-            open_button.setToolTip("Открыть профиль или диалог с пользователем в MAX")
+            open_button.setToolTip("Открыть профиль или диалог в веб-версии MAX")
             open_button.clicked.connect(
                 lambda _checked=False, user_id=link.max_user_id: self._open_max_user(user_id)
             )
@@ -120,11 +123,12 @@ class WorkBotBindingsDialog(QDialog):
             )
 
     def _open_max_user(self, user_id: int) -> None:
-        if QDesktopServices.openUrl(QUrl(f"max://user/{user_id}")):
+        url = QUrl(MAX_WEB_USER_URL.format(user_id=user_id))
+        if QDesktopServices.openUrl(url):
             return
         self._message(
-            "Не удалось открыть MAX. Проверьте, что приложение установлено и зарегистрировано "
-            "в Windows для открытия ссылок max://.",
+            "Не удалось открыть веб-версию MAX. Проверьте браузер по умолчанию "
+            "и подключение к интернету.",
             QMessageBox.Icon.Warning,
         )
 
