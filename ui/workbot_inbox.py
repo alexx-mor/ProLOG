@@ -32,6 +32,8 @@ from hours import format_hours, parse_hours
 from integrations.workbot.models import STATUS_LABELS, WorkBotInboxRow, WorkBotSyncResult
 from integrations.workbot.service import WorkBotIntegrationService
 from models import DirectoryItem, Employee
+from models import ProductItem
+from ui.workbot_bindings_dialog import WorkBotBindingsDialog
 
 ROW_ID_ROLE = Qt.ItemDataRole.UserRole
 
@@ -40,6 +42,7 @@ class WorkBotInboxWidget(QWidget):
     source_path_changed = Signal(str)
     imported = Signal()
     status_message = Signal(str)
+    bindings_changed = Signal()
 
     def __init__(self, service: WorkBotIntegrationService, parent=None) -> None:
         super().__init__(parent)
@@ -49,6 +52,7 @@ class WorkBotInboxWidget(QWidget):
         self.locations: list[DirectoryItem] = []
         self.objects: list[DirectoryItem] = []
         self.work_types: list[DirectoryItem] = []
+        self.products: list[ProductItem] = []
         self._sync_thread: QThread | None = None
         self._sync_worker: WorkBotSyncWorker | None = None
         self.reviewer = ""
@@ -58,6 +62,7 @@ class WorkBotInboxWidget(QWidget):
         self.source_path.setPlaceholderText("Выберите файл workbot.sqlite3")
         self.choose_source = QPushButton("Выбрать базу")
         self.sync_button = QPushButton("Проверить новые")
+        self.bindings_button = QPushButton("Привязки пользователей")
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setTextVisible(False)
@@ -67,9 +72,12 @@ class WorkBotInboxWidget(QWidget):
         for status, label in STATUS_LABELS.items():
             self.filter.addItem(label, status)
 
-        self.table = QTableWidget(0, 8)
+        self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
-            ["Статус", "Дата", "Сотрудник", "Объект", "Местонахождение", "Часы", "Источник", "Версия"]
+            [
+                "Статус", "Дата", "Сотрудник", "Объект", "Изделие",
+                "Местонахождение", "Часы", "Источник", "Версия",
+            ]
         )
 
         self.employee = QComboBox()
@@ -79,6 +87,9 @@ class WorkBotInboxWidget(QWidget):
         self.location = QComboBox()
         self.object = QComboBox()
         self.work_type = QComboBox()
+        self.product = QComboBox()
+        self.product_reference = QLineEdit()
+        self.product_reference.setPlaceholderText("Например: ШУ-12 или заводской номер")
         self.hours = QLineEdit()
         self.hours.setValidator(
             QRegularExpressionValidator(
@@ -108,6 +119,7 @@ class WorkBotInboxWidget(QWidget):
         source_row.addWidget(QLabel("База WorkBot"))
         source_row.addWidget(self.source_path, 1)
         source_row.addWidget(self.choose_source)
+        source_row.addWidget(self.bindings_button)
         source_row.addWidget(self.sync_button)
         source_row.addWidget(self.progress)
 
@@ -130,6 +142,8 @@ class WorkBotInboxWidget(QWidget):
         form.addRow("Дата", self.work_date)
         form.addRow("Местонахождение", self.location)
         form.addRow("Объект", self.object)
+        form.addRow("Изделие", self.product)
+        form.addRow("Обозначение в сообщении", self.product_reference)
         form.addRow("Вид работ", self.work_type)
         form.addRow("Часы", self.hours)
         form.addRow("Описание работ", self.description)
@@ -166,16 +180,18 @@ class WorkBotInboxWidget(QWidget):
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(False)
-        for column, width in enumerate((175, 90, 190, 160, 175, 70, 90, 65)):
+        for column, width in enumerate((175, 90, 185, 145, 160, 155, 65, 85, 60)):
             self.table.setColumnWidth(column, width)
 
     def _connect(self) -> None:
         self.choose_source.clicked.connect(self._choose_source)
         self.sync_button.clicked.connect(self._start_sync)
+        self.bindings_button.clicked.connect(self._edit_bindings)
         self.filter.currentIndexChanged.connect(self.refresh)
         self.table.itemSelectionChanged.connect(self._load_selected)
         self.import_button.clicked.connect(self._import_selected)
         self.reject_button.clicked.connect(self._reject_selected)
+        self.product.currentIndexChanged.connect(self._product_changed)
 
     def set_source_path(self, value: str) -> None:
         self.source_path.setText(value)
@@ -189,15 +205,18 @@ class WorkBotInboxWidget(QWidget):
         locations: list[DirectoryItem],
         objects: list[DirectoryItem],
         work_types: list[DirectoryItem],
+        products: list[ProductItem],
     ) -> None:
         self.employees = employees
         self.locations = locations
         self.objects = objects
         self.work_types = work_types
+        self.products = products
         self._fill_combo(self.employee, employees, "full_name")
         self._fill_combo(self.location, locations)
         self._fill_combo(self.object, objects)
         self._fill_combo(self.work_type, work_types)
+        self._fill_product_combo()
 
     def refresh(self) -> None:
         selected_id = self._selected_row_id()
@@ -207,9 +226,10 @@ class WorkBotInboxWidget(QWidget):
             values = [
                 STATUS_LABELS.get(row.status, row.status),
                 row.work_date.strftime("%d.%m.%Y"),
-                row.employee_text,
-                row.object_text,
-                row.location_text,
+                self._employee_name(row.employee_id, row.employee_text),
+                self._directory_name(row.object_id, row.object_text, self.objects),
+                self._product_name(row.product_id, row.product_text),
+                self._directory_name(row.location_id, row.location_text, self.locations),
                 format_hours(row.hours),
                 {"strict": "MAX", "historical": "История", "unparsed": "Ошибка"}.get(
                     row.source_kind, row.source_kind
@@ -228,6 +248,7 @@ class WorkBotInboxWidget(QWidget):
                     "needs_object",
                     "invalid_hours",
                     "source_error",
+                    "product_conflict",
                     "changed_after_import",
                 }:
                     item.setForeground(QColor("#b54532"))
@@ -271,6 +292,21 @@ class WorkBotInboxWidget(QWidget):
         self._sync_worker = worker
         thread.start()
 
+    def _edit_bindings(self) -> None:
+        value = self.source_path.text().strip()
+        if not value:
+            self._message("Сначала выберите базу WorkBot", QMessageBox.Icon.Information)
+            return
+        try:
+            dialog = WorkBotBindingsDialog(self.service, Path(value), self.employees, self)
+        except Exception as exc:
+            self._message(str(exc), QMessageBox.Icon.Warning)
+            return
+        if dialog.exec():
+            self.bindings_changed.emit()
+            self.status_message.emit("Привязки пользователей WorkBot сохранены")
+            self._start_sync()
+
     @Slot(object)
     def _sync_finished(self, result: WorkBotSyncResult) -> None:
         self._set_syncing(False)
@@ -294,6 +330,7 @@ class WorkBotInboxWidget(QWidget):
         self.progress.setVisible(active)
         self.sync_button.setEnabled(not active)
         self.choose_source.setEnabled(not active)
+        self.bindings_button.setEnabled(not active)
 
     def _load_selected(self) -> None:
         row = self._selected_row()
@@ -306,6 +343,8 @@ class WorkBotInboxWidget(QWidget):
         self._select_combo(self.location, row.location_id)
         self._select_combo(self.object, row.object_id)
         self._select_combo(self.work_type, row.work_type_id)
+        self._select_combo(self.product, row.product_id)
+        self.product_reference.setText(row.product_text)
         self.work_date.setDate(QDate(row.work_date.year, row.work_date.month, row.work_date.day))
         self.hours.setText(format_hours(row.hours))
         self.description.setPlainText(row.work_types)
@@ -328,6 +367,8 @@ class WorkBotInboxWidget(QWidget):
                 location_id=self.location.currentData(),
                 object_id=self.object.currentData(),
                 work_type_id=self.work_type.currentData(),
+                product_id=self.product.currentData(),
+                product_alias_text=self.product_reference.text(),
                 description=self.description.toPlainText(),
                 hours=parse_hours(self.hours.text()),
                 remember=self.remember.isChecked(),
@@ -364,6 +405,41 @@ class WorkBotInboxWidget(QWidget):
         for item in items:
             combo.addItem(str(getattr(item, text_attr)), item.id)
         self._select_combo(combo, current)
+
+    def _fill_product_combo(self) -> None:
+        current = self.product.currentData()
+        self.product.clear()
+        self.product.addItem("Без изделия", None)
+        for product in self.products:
+            details = " / ".join(value for value in (product.serial_number, product.code) if value)
+            label = f"{product.object_name} — {product.name}"
+            if details:
+                label += f" ({details})"
+            self.product.addItem(label, product.id)
+        self._select_combo(self.product, current)
+
+    def _product_changed(self) -> None:
+        product_id = self.product.currentData()
+        product = next((item for item in self.products if item.id == product_id), None)
+        if product is not None:
+            self._select_combo(self.object, product.object_id)
+
+    def _product_name(self, product_id: int | None, fallback: str) -> str:
+        product = next((item for item in self.products if item.id == product_id), None)
+        return product.name if product else fallback
+
+    def _employee_name(self, employee_id: int | None, fallback: str) -> str:
+        employee = next((item for item in self.employees if item.id == employee_id), None)
+        return employee.full_name if employee else fallback
+
+    def _directory_name(
+        self,
+        item_id: int | None,
+        fallback: str,
+        items: list[DirectoryItem],
+    ) -> str:
+        item = next((value for value in items if value.id == item_id), None)
+        return item.name if item else fallback
 
     def _select_combo(self, combo: QComboBox, item_id: int | None) -> None:
         index = combo.findData(item_id)

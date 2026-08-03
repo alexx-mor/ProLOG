@@ -1,5 +1,28 @@
 ﻿# Changelog
 
+## 2026-08-03 - MAX identity registry and product recognition
+
+### Added
+
+- Added a preliminary registry for binding MAX user IDs to ProLOG employees before reports are synchronized.
+- Added mobile phone storage to employee cards, optional Excel import/export and phone editing in the MAX binding registry.
+- Added deterministic product recognition by serial number, code, name and confirmed aliases.
+- A recognized product now supplies its owning object automatically; conflicting product/object choices require manual review.
+- Added manual product selection and source-reference editing to the WorkBot inbox.
+
+### Changed
+
+- Unchanged WorkBot messages are rematched after user bindings or directory aliases change, without creating duplicate revisions.
+- Bumped the application and Windows executable version to `0.3.0`.
+
+### Verified
+
+- All project tests pass: `18 passed`.
+- Migration smoke test preserved 47 employees and existing work logs while adding phone and product-matching fields.
+- The current WorkBot database exposes 26 MAX users for preliminary binding.
+- The current product serial number `3076` was recognized in 10 WorkBot report rows and linked to its object.
+- Qt offscreen smoke test passed for the nine-column inbox and the user-binding dialog.
+
 ## 2026-07-31 - WorkBot inbox integration
 
 ### Added

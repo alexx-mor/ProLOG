@@ -42,6 +42,40 @@ class WorkBotRepository:
                     (message_id,),
                 ).fetchone()
                 if previous and previous["content_hash"] == rows[0].content_hash:
+                    for row in rows:
+                        connection.execute(
+                            """
+                            UPDATE WorkBotImportRows
+                            SET employee_id = ?, object_id = ?, location_id = ?, work_type_id = ?,
+                                product_id = ?, product_text = ?,
+                                status = CASE
+                                    WHEN status IN ('imported', 'rejected', 'changed_after_import') THEN status
+                                    ELSE ?
+                                END,
+                                error_message = CASE
+                                    WHEN status IN ('imported', 'rejected', 'changed_after_import') THEN error_message
+                                    ELSE ?
+                                END,
+                                updated_at = ?
+                            WHERE max_message_id = ? AND revision = ?
+                              AND source_index = ? AND source_kind = ?
+                            """,
+                            (
+                                row.employee_id,
+                                row.object_id,
+                                row.location_id,
+                                row.work_type_id,
+                                row.product_id,
+                                row.product_text,
+                                row.status,
+                                row.error_message,
+                                now,
+                                message_id,
+                                int(previous["revision"]),
+                                row.source_index,
+                                row.source_kind,
+                            ),
+                        )
                     unchanged += 1
                     continue
                 revision = int(previous["revision"]) + 1 if previous else 1
@@ -78,11 +112,13 @@ class WorkBotRepository:
                             row.hours,
                             row.object_text,
                             row.location_text,
+                            row.product_text,
                             row.confidence,
                             row.employee_id,
                             row.object_id,
                             row.location_id,
                             row.work_type_id,
+                            row.product_id,
                             status,
                             row.error_message,
                             now,
@@ -137,6 +173,43 @@ class WorkBotRepository:
                 )
             }
 
+    def save_employee_binding(
+        self,
+        max_user_id: int,
+        employee_id: int | None,
+        username_snapshot: str = "",
+    ) -> None:
+        now = _now()
+        with self.database.connect() as connection:
+            if employee_id is None:
+                connection.execute(
+                    "UPDATE MaxUserBindings SET is_active = 0, updated_at = ? WHERE max_user_id = ?",
+                    (now, max_user_id),
+                )
+                return
+            connection.execute(
+                """
+                UPDATE MaxUserBindings
+                SET is_active = 0, updated_at = ?
+                WHERE employee_id = ? AND max_user_id <> ?
+                """,
+                (now, employee_id, max_user_id),
+            )
+            connection.execute(
+                """
+                INSERT INTO MaxUserBindings(
+                    max_user_id, employee_id, username_snapshot, is_active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 1, ?, ?)
+                ON CONFLICT(max_user_id) DO UPDATE SET
+                    employee_id = excluded.employee_id,
+                    username_snapshot = excluded.username_snapshot,
+                    is_active = 1,
+                    updated_at = excluded.updated_at
+                """,
+                (max_user_id, employee_id, username_snapshot.strip(), now, now),
+            )
+
     def alias_target(self, alias_table: str, value: str) -> int | None:
         table, target = ALIAS_TABLES[alias_table]
         with self.database.connect() as connection:
@@ -172,6 +245,7 @@ class WorkBotRepository:
         entry: WorkLogEntry,
         remember_aliases: bool,
         remember_sender: bool,
+        product_alias_text: str = "",
         reviewer: str = "",
     ) -> int:
         now = _now()
@@ -210,7 +284,8 @@ class WorkBotRepository:
             connection.execute(
                 """
                 UPDATE WorkBotImportRows
-                SET employee_id = ?, object_id = ?, location_id = ?, work_type_id = ?,
+                SET employee_id = ?, object_id = ?, location_id = ?, work_type_id = ?, product_id = ?,
+                    product_text = ?,
                     work_date = ?, work_types = ?, hours = ?, status = 'imported',
                     error_message = '', worklog_entry_id = ?, imported_at = ?,
                     reviewed_by = ?, reviewed_at = ?, updated_at = ?
@@ -221,6 +296,8 @@ class WorkBotRepository:
                     entry.object_id,
                     entry.location_id,
                     entry.work_type_id,
+                    entry.product_id,
+                    product_alias_text.strip(),
                     entry.work_date.isoformat(),
                     entry.description.strip(),
                     entry.hours,
@@ -248,6 +325,14 @@ class WorkBotRepository:
                 self._remember_alias(connection, "EmployeeAliases", "employee_id", row["employee_text"], entry.employee_id, now)
                 self._remember_alias(connection, "ObjectAliases", "object_id", row["object_text"], entry.object_id, now)
                 self._remember_alias(connection, "LocationAliases", "location_id", row["location_text"], entry.location_id, now)
+                self._remember_alias(
+                    connection,
+                    "ProductAliases",
+                    "product_id",
+                    product_alias_text or row["product_text"],
+                    entry.product_id,
+                    now,
+                )
             return worklog_id
 
     def _remember_alias(
@@ -292,11 +377,13 @@ class WorkBotRepository:
             hours=float(row["hours"] or 0),
             object_text=str(row["object_text"] or ""),
             location_text=str(row["location_text"] or ""),
+            product_text=str(row["product_text"] or ""),
             confidence=float(row["confidence"] or 0),
             employee_id=row["employee_id"],
             object_id=row["object_id"],
             location_id=row["location_id"],
             work_type_id=row["work_type_id"],
+            product_id=row["product_id"],
             status=str(row["status"]),
             error_message=str(row["error_message"] or ""),
             worklog_entry_id=row["worklog_entry_id"],
@@ -315,15 +402,16 @@ ALIAS_TABLES = {
     "employee": ("EmployeeAliases", "employee_id"),
     "object": ("ObjectAliases", "object_id"),
     "location": ("LocationAliases", "location_id"),
+    "product": ("ProductAliases", "product_id"),
 }
 
 INSERT_ROW_SQL = """
 INSERT INTO WorkBotImportRows (
     max_message_id, revision, source_index, source_kind, sender_id, chat_id,
     received_at, content_hash, raw_text, source_fragment, employee_text,
-    work_date, work_types, hours, object_text, location_text, confidence,
-    employee_id, object_id, location_id, work_type_id, status, error_message,
+    work_date, work_types, hours, object_text, location_text, product_text, confidence,
+    employee_id, object_id, location_id, work_type_id, product_id, status, error_message,
     created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """

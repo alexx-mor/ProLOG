@@ -24,9 +24,12 @@ def import_employees(path: Path, service: EmployeeService) -> int:
         sheet = workbook.active
         headers = [str(cell.value or "").strip().lower() for cell in next(sheet.iter_rows(max_row=1))]
         required = {"фио": None, "должность": None, "категория": None, "разряд": None}
+        phone_column = None
         for index, header in enumerate(headers):
             if header in required:
                 required[header] = index
+            if header in {"телефон", "мобильный телефон", "мобильный"}:
+                phone_column = index
         if required["фио"] is None:
             raise ValueError("В Excel-файле не найдена колонка 'ФИО'")
 
@@ -39,6 +42,7 @@ def import_employees(path: Path, service: EmployeeService) -> int:
                 full_name=full_name,
                 position=_value(row, required["должность"]),
                 category=_value(row, required["категория"]) or _value(row, required["разряд"]),
+                mobile_phone=_value(row, phone_column),
             )
             imported += 1
         return imported
@@ -50,7 +54,7 @@ def export_employees(path: Path, employees: list[Employee]) -> Path:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Сотрудники"
-    _write_header(sheet, ["№", "ФИО", "Должность", "Разряд"])
+    _write_header(sheet, ["№", "ФИО", "Должность", "Разряд", "Мобильный телефон"])
     for row_index, employee in enumerate(employees, start=2):
         sheet.append(
             [
@@ -58,6 +62,7 @@ def export_employees(path: Path, employees: list[Employee]) -> Path:
                 employee.full_name,
                 employee.position,
                 employee.category,
+                employee.mobile_phone,
             ]
         )
     _autosize(sheet)

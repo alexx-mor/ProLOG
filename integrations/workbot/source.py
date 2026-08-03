@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 
 from hours import normalize_hours
-from integrations.workbot.models import WorkBotCandidate
+from integrations.workbot.models import WorkBotCandidate, WorkBotSourceUser
 
 
 class WorkBotSource:
@@ -30,6 +30,34 @@ class WorkBotSource:
         candidates = [self._map(row) for row in rows]
         self._assign_message_hashes(candidates)
         return candidates
+
+    def read_users(self, path: Path) -> list[WorkBotSourceUser]:
+        if not path.is_file():
+            raise ValueError("База WorkBot не найдена")
+        connection = self._connect(path)
+        try:
+            self._validate_schema(connection)
+            rows = connection.execute(
+                """
+                SELECT max_user_id, first_name, last_name, username, employee_name
+                FROM users
+                ORDER BY COALESCE(NULLIF(employee_name, ''), last_name, first_name), max_user_id
+                """
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise ValueError(f"Не удалось прочитать пользователей WorkBot: {exc}") from exc
+        finally:
+            connection.close()
+        return [
+            WorkBotSourceUser(
+                max_user_id=int(row["max_user_id"]),
+                first_name=str(row["first_name"] or "").strip(),
+                last_name=str(row["last_name"] or "").strip(),
+                username=str(row["username"] or "").strip(),
+                employee_text=str(row["employee_name"] or "").strip(),
+            )
+            for row in rows
+        ]
 
     def _connect(self, path: Path) -> sqlite3.Connection:
         uri = f"{path.resolve().as_uri()}?mode=ro"

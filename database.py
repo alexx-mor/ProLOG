@@ -75,6 +75,9 @@ class Database:
             self._seed(connection)
 
     def _migrate(self, connection: sqlite3.Connection) -> None:
+        employee_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Employees)")}
+        if "mobile_phone" not in employee_columns:
+            connection.execute("ALTER TABLE Employees ADD COLUMN mobile_phone TEXT NOT NULL DEFAULT ''")
         position_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Positions)")}
         if "category" not in position_columns:
             connection.execute("ALTER TABLE Positions ADD COLUMN category TEXT NOT NULL DEFAULT '1-3'")
@@ -120,6 +123,11 @@ class Database:
         worklog_columns = {row["name"] for row in connection.execute("PRAGMA table_info(WorkLogEntries)")}
         if "product_id" not in worklog_columns:
             connection.execute("ALTER TABLE WorkLogEntries ADD COLUMN product_id INTEGER REFERENCES Products(id)")
+        workbot_columns = {row["name"] for row in connection.execute("PRAGMA table_info(WorkBotImportRows)")}
+        if "product_text" not in workbot_columns:
+            connection.execute("ALTER TABLE WorkBotImportRows ADD COLUMN product_text TEXT NOT NULL DEFAULT ''")
+        if "product_id" not in workbot_columns:
+            connection.execute("ALTER TABLE WorkBotImportRows ADD COLUMN product_id INTEGER REFERENCES Products(id)")
         connection.execute("UPDATE Positions SET category = '—', student_allowed = 0 WHERE name = 'Мастер чистоты'")
         connection.execute(
             """
@@ -961,6 +969,7 @@ class EmployeeRepository:
             if needle in employee.full_name.casefold()
             or needle in employee.position.casefold()
             or needle in employee.category.casefold()
+            or needle in employee.mobile_phone.casefold()
         ]
 
     def get(self, employee_id: int) -> Employee | None:
@@ -981,7 +990,7 @@ class EmployeeRepository:
                 connection.execute(
                     """
                     UPDATE Employees
-                    SET full_name = ?, position = ?, category = ?, status = ?
+                    SET full_name = ?, position = ?, category = ?, status = ?, mobile_phone = ?
                     WHERE id = ?
                     """,
                     (
@@ -989,24 +998,30 @@ class EmployeeRepository:
                         employee.position.strip(),
                         employee.category.strip(),
                         employee.status,
+                        employee.mobile_phone.strip(),
                         employee.id,
                     ),
                 )
                 return employee.id
             cursor = connection.execute(
                 """
-                INSERT INTO Employees (full_name, position, category, status)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO Employees (full_name, position, category, status, mobile_phone)
+                VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(full_name) DO UPDATE SET
                     position = excluded.position,
                     category = excluded.category,
-                    status = excluded.status
+                    status = excluded.status,
+                    mobile_phone = CASE
+                        WHEN excluded.mobile_phone <> '' THEN excluded.mobile_phone
+                        ELSE Employees.mobile_phone
+                    END
                 """,
                 (
                     employee.full_name.strip(),
                     employee.position.strip(),
                     employee.category.strip(),
                     employee.status,
+                    employee.mobile_phone.strip(),
                 ),
             )
             row = connection.execute("SELECT id FROM Employees WHERE full_name = ?", (employee.full_name.strip(),)).fetchone()
@@ -1029,6 +1044,7 @@ class EmployeeRepository:
             position=row["position"] or "",
             category=row["category"] or "",
             status=row["status"],
+            mobile_phone=row["mobile_phone"] or "",
         )
 
 
@@ -1242,7 +1258,8 @@ CREATE TABLE IF NOT EXISTS Employees (
     full_name TEXT NOT NULL UNIQUE,
     position TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'Активен'
+    status TEXT NOT NULL DEFAULT 'Активен',
+    mobile_phone TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS WorkLogEntries (
@@ -1328,6 +1345,14 @@ CREATE TABLE IF NOT EXISTS LocationAliases (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ProductAliases (
+    alias_normalized TEXT PRIMARY KEY,
+    original_alias TEXT NOT NULL,
+    product_id INTEGER NOT NULL REFERENCES Products(id),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS WorkBotImportRows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     max_message_id TEXT NOT NULL,
@@ -1346,11 +1371,13 @@ CREATE TABLE IF NOT EXISTS WorkBotImportRows (
     hours REAL NOT NULL DEFAULT 0,
     object_text TEXT NOT NULL DEFAULT '',
     location_text TEXT NOT NULL DEFAULT '',
+    product_text TEXT NOT NULL DEFAULT '',
     confidence REAL NOT NULL DEFAULT 0,
     employee_id INTEGER REFERENCES Employees(id),
     object_id INTEGER REFERENCES Objects(id),
     location_id INTEGER REFERENCES Locations(id),
     work_type_id INTEGER REFERENCES WorkTypes(id),
+    product_id INTEGER REFERENCES Products(id),
     status TEXT NOT NULL DEFAULT 'new',
     error_message TEXT NOT NULL DEFAULT '',
     worklog_entry_id INTEGER UNIQUE REFERENCES WorkLogEntries(id),

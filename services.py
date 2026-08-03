@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 
 from analytics import AnalyticsResult, build_analytics
 from category_rules import STUDENT_CATEGORY, category_values_from_rule, normalize_employee_category
@@ -180,6 +181,7 @@ class EmployeeService:
             raise ValueError("Укажите ФИО сотрудника")
         employee.position = _uppercase_first(employee.position)
         employee.category = _normalize_employee_category(employee.category)
+        employee.mobile_phone = normalize_mobile_phone(employee.mobile_phone)
         known_category_rule = self.directories.category_for_position(employee.position)
         position_id = self.directories.ensure("positions", employee.position)
         json_position_categories = load_position_category_map()
@@ -194,18 +196,26 @@ class EmployeeService:
             self._validate_category(employee)
         return self.employees.save(employee)
 
-    def import_employee(self, full_name: str, position: str, category: str) -> int:
+    def import_employee(self, full_name: str, position: str, category: str, mobile_phone: str = "") -> int:
         return self.save(
             Employee(
                 full_name=full_name,
                 position=position,
                 category=category,
+                mobile_phone=mobile_phone,
             ),
             validate_category=False,
         )
 
     def delete(self, employee_id: int) -> None:
         self.employees.delete(employee_id)
+
+    def update_mobile_phone(self, employee_id: int, mobile_phone: str) -> None:
+        employee = self.get(employee_id)
+        if employee is None:
+            raise ValueError("Сотрудник не найден")
+        employee.mobile_phone = normalize_mobile_phone(mobile_phone)
+        self.employees.save(employee)
 
     def _validate_category(self, employee: Employee) -> None:
         rule = self.directories.category_for_position(employee.position)
@@ -232,6 +242,20 @@ def _uppercase_first(value: str) -> str:
     if not stripped:
         return ""
     return stripped[0].upper() + stripped[1:]
+
+
+def normalize_mobile_phone(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return ""
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) == 10:
+        digits = "7" + digits
+    elif len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    if not 11 <= len(digits) <= 15:
+        raise ValueError("Укажите мобильный телефон в международном формате, например +7 999 123-45-67")
+    return "+" + digits
 
 
 def _normalize_employee_category(value: str) -> str:

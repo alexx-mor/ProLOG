@@ -178,6 +178,7 @@ class MainWindow(QMainWindow):
         self.analytics_widget.filters_changed.connect(self.refresh_analytics)
         self.workbot_inbox.source_path_changed.connect(self._save_workbot_source_path)
         self.workbot_inbox.imported.connect(self.refresh_worklogs)
+        self.workbot_inbox.bindings_changed.connect(self.refresh_employees)
         self.workbot_inbox.status_message.connect(lambda message: self.statusBar().showMessage(message, 10000))
 
     def refresh_directories(self) -> None:
@@ -284,6 +285,7 @@ class MainWindow(QMainWindow):
             self.directories.list_all("locations"),
             self.directories.list_all("objects"),
             self.directories.list_all("work_types"),
+            self.directories.list_products(active_only=False),
         )
 
     def _save_workbot_source_path(self, value: str) -> None:

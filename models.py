@@ -48,6 +48,7 @@ class Employee:
     category: str = ""
     status: str = EmployeeStatus.ACTIVE.value
     id: int | None = None
+    mobile_phone: str = ""
 
 
 @dataclass(slots=True)

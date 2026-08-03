@@ -187,6 +187,8 @@ class EmployeeDialog(QDialog):
         self.setWindowTitle("Сотрудник")
         self.setMinimumWidth(660)
         self.full_name = QLineEdit(employee.full_name if employee else "")
+        self.mobile_phone = QLineEdit(employee.mobile_phone if employee else "")
+        self.mobile_phone.setPlaceholderText("+7 999 123-45-67")
         self.position = QComboBox()
         self.position.setEditable(True)
         self.position.setView(QListView())
@@ -213,6 +215,7 @@ class EmployeeDialog(QDialog):
         buttons.addWidget(cancel_button)
         layout = QFormLayout(self)
         layout.addRow("ФИО", self.full_name)
+        layout.addRow("Мобильный телефон", self.mobile_phone)
         layout.addRow("Должность", self.position)
         layout.addRow("Разряд", self.category)
         layout.addRow(buttons)
@@ -225,6 +228,7 @@ class EmployeeDialog(QDialog):
             full_name=self.full_name.text(),
             position=self.position.currentText(),
             category=self.category.currentText(),
+            mobile_phone=self.mobile_phone.text(),
         )
 
     def _sync_categories(self, current: str = "") -> None:
