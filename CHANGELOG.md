@@ -1,5 +1,20 @@
 ﻿# Changelog
 
+## 2026-08-03 - Open MAX user from ProLOG
+
+### Added
+
+- Added an `Открыть` button for every user in the WorkBot binding registry.
+- The button opens the corresponding MAX profile or dialog through `max://user/<MAX_ID>`.
+- Added a clear warning when MAX is not installed or the protocol is unavailable in Windows.
+- Bumped the application and Windows executable version to `0.3.2`.
+
+### Verified
+
+- All project tests pass: `24 passed`.
+- The Qt test confirms that the row button opens the exact `max://user/<MAX_ID>` link.
+- The packaged executable starts successfully with the existing production database.
+
 ## 2026-08-03 - Verified MAX identity
 
 ### Added

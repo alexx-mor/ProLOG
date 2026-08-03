@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -33,11 +35,11 @@ class WorkBotBindingsDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Привязки пользователей WorkBot")
-        self.resize(1320, 640)
+        self.resize(1440, 640)
         self.service = service
         self.employees = sorted(employees, key=lambda item: item.full_name.casefold())
         self.links = service.list_user_links(source_path)
-        self.table = QTableWidget(len(self.links), 7)
+        self.table = QTableWidget(len(self.links), 8)
         self.table.setHorizontalHeaderLabels(
             [
                 "MAX ID",
@@ -47,6 +49,7 @@ class WorkBotBindingsDialog(QDialog):
                 "Сотрудник ProLOG",
                 "Телефон сотрудника",
                 "Состояние",
+                "MAX",
             ]
         )
         self.save_button = QPushButton("Сохранить привязки")
@@ -83,7 +86,7 @@ class WorkBotBindingsDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        for column, width in enumerate((105, 175, 180, 205, 245, 165, 220)):
+        for column, width in enumerate((105, 175, 180, 205, 245, 165, 210, 105)):
             self.table.setColumnWidth(column, width)
         for row_index, link in enumerate(self.links):
             self.table.setItem(row_index, 0, QTableWidgetItem(str(link.max_user_id)))
@@ -106,9 +109,24 @@ class WorkBotBindingsDialog(QDialog):
             state = QTableWidgetItem(link.match_message)
             state.setToolTip(link.match_message)
             self.table.setItem(row_index, 6, state)
+            open_button = QPushButton("Открыть")
+            open_button.setToolTip("Открыть профиль или диалог с пользователем в MAX")
+            open_button.clicked.connect(
+                lambda _checked=False, user_id=link.max_user_id: self._open_max_user(user_id)
+            )
+            self.table.setCellWidget(row_index, 7, open_button)
             employee_combo.currentIndexChanged.connect(
                 lambda _index, row=row_index: self._employee_changed(row)
             )
+
+    def _open_max_user(self, user_id: int) -> None:
+        if QDesktopServices.openUrl(QUrl(f"max://user/{user_id}")):
+            return
+        self._message(
+            "Не удалось открыть MAX. Проверьте, что приложение установлено и зарегистрировано "
+            "в Windows для открытия ссылок max://.",
+            QMessageBox.Icon.Warning,
+        )
 
     def _employee_changed(self, row_index: int) -> None:
         employee_combo = self.table.cellWidget(row_index, 4)
