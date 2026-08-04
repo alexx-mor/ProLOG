@@ -148,6 +148,27 @@ class WorkBotRepository:
         with self.database.connect() as connection:
             return [self._map(row) for row in connection.execute(sql, params)]
 
+    def inbox_counts(self) -> tuple[int, int, int]:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                WITH latest AS (
+                    SELECT max_message_id, MAX(revision) AS revision
+                    FROM WorkBotImportRows
+                    GROUP BY max_message_id
+                )
+                SELECT
+                    COUNT(*) AS total_rows,
+                    COALESCE(SUM(r.status = 'imported'), 0) AS imported_rows,
+                    COALESCE(SUM(r.status NOT IN ('ready', 'imported', 'rejected')), 0) AS error_rows
+                FROM WorkBotImportRows r
+                JOIN latest
+                  ON latest.max_message_id = r.max_message_id
+                 AND latest.revision = r.revision
+                """
+            ).fetchone()
+        return int(row["total_rows"]), int(row["imported_rows"]), int(row["error_rows"])
+
     def get(self, row_id: int) -> WorkBotInboxRow | None:
         with self.database.connect() as connection:
             row = connection.execute(

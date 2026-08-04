@@ -1,5 +1,30 @@
 ﻿# Changelog
 
+## 2026-08-04 - WorkBot employee matching and inbox metrics
+
+### Added
+
+- Added live counts for source MAX messages, current incoming rows, imported rows
+  and rows that still require correction.
+- All product-directory columns are now resizable, and their widths are persisted
+  in ProLOG settings between refreshes and application restarts.
+
+### Fixed
+
+- Abbreviated names such as `Тимохин В.И.` now resolve against the employee's full
+  name instead of falling back to the MAX sender binding.
+- Historical rows with an explicit but unresolved employee remain unassigned for
+  review, preventing the first sender from being duplicated across the team.
+- The review editor always displays the complete immutable source message; parsed
+  fragments are used only to build incoming rows.
+- Bumped the application and Windows executable version to `0.5.3`.
+
+### Verified
+
+- All project tests pass: `34 passed`.
+- The reported three-person message resolves to three distinct employee IDs on a
+  read-only scan of the current ProLOG and WorkBot databases.
+
 ## 2026-08-04 - Detailed WorkBot report allocation
 
 ### Added

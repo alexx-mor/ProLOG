@@ -990,7 +990,12 @@ class DirectoryDialog(QDialog):
             key: self.directory_service.ui_setting(f"directory/show_inactive/{key}", "1") == "1"
             for key in self.directory_labels
         }
-        self._column_widths_by_key: dict[str, list[int]] = {}
+        self._column_widths_by_key = {
+            key: _parse_column_widths(
+                self.directory_service.ui_setting(f"directory/column_widths/{key}", "")
+            )
+            for key in self.directory_labels
+        }
         self._configured_key = ""
         self.navigation = QListWidget()
         self.navigation.setFixedWidth(285)
@@ -2093,10 +2098,10 @@ class DirectoryDialog(QDialog):
             self.table.setHorizontalHeaderLabels(
                 ["Объект", "Зав. №", "Наименование", "Шифр", "Состояние", "Готовность", "Начало", "Выпуск", "Статус"]
             )
-            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-            self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
-            for column in (1, 3, 4, 5, 6, 7, 8):
-                self.table.horizontalHeader().setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            for column in range(9):
+                self.table.horizontalHeader().setSectionResizeMode(
+                    column, QHeaderView.ResizeMode.Interactive
+                )
             self.table.setColumnWidth(0, 220)
             self.table.setColumnWidth(1, 110)
             self.table.setColumnWidth(2, 240)
@@ -2157,9 +2162,14 @@ class DirectoryDialog(QDialog):
     def _remember_column_widths(self) -> None:
         if not self._configured_key or self.table.columnCount() <= 0:
             return
-        self._column_widths_by_key[self._configured_key] = [
+        widths = [
             self.table.columnWidth(column) for column in range(self.table.columnCount())
         ]
+        self._column_widths_by_key[self._configured_key] = widths
+        self.directory_service.set_ui_setting(
+            f"directory/column_widths/{self._configured_key}",
+            ",".join(str(width) for width in widths),
+        )
 
     def _restore_column_widths(self) -> None:
         widths = self._column_widths_by_key.get(self.current_key, [])
@@ -2167,6 +2177,10 @@ class DirectoryDialog(QDialog):
             return
         for column, width in enumerate(widths):
             self.table.setColumnWidth(column, width)
+
+    def done(self, result: int) -> None:
+        self._remember_column_widths()
+        super().done(result)
 
     def _status_column(self) -> int:
         if self.current_key == "positions":
@@ -2231,6 +2245,14 @@ class DirectoryDialog(QDialog):
             if item:
                 item.setBackground(background)
                 item.setForeground(foreground)
+
+
+def _parse_column_widths(value: str) -> list[int]:
+    try:
+        widths = [int(part) for part in value.split(",") if part.strip()]
+    except ValueError:
+        return []
+    return widths if all(width > 0 for width in widths) else []
 
 
 def _status_item(is_active: bool) -> QTableWidgetItem:

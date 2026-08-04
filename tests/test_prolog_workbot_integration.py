@@ -107,8 +107,8 @@ def test_historical_message_is_split_for_each_explicit_employee(tmp_path: Path) 
     source_path = tmp_path / "workbot.sqlite3"
     _create_workbot_source(source_path)
     fragment = (
-        "Иванов Иван Иванович\n"
-        "Петров Петр Петрович\n"
+        "Иванов И. И.\n"
+        "Петров П. П.\n"
         "1) Монтаж Жигалово ШУ-12 (5 часов)\n"
         "2) Подключение УНР ШУФ 9 (3 часа)"
     )
@@ -119,7 +119,7 @@ def test_historical_message_is_split_for_each_explicit_employee(tmp_path: Path) 
             (fragment,),
         )
         for source_index, employee_name in enumerate(
-            ("Иванов Иван Иванович", "Петров Петр Петрович")
+            ("Иванов И.И.", "Петров П.П.")
         ):
             connection.execute(
                 """
@@ -151,6 +151,12 @@ def test_historical_message_is_split_for_each_explicit_employee(tmp_path: Path) 
     ]
     assert [row.object_id for row in rows] == [object_id, unr_id, object_id, unr_id]
     assert [row.hours for row in rows] == [5.0, 3.0, 5.0, 3.0]
+    assert all(row.raw_text == fragment for row in rows)
+    stats = service.inbox_stats(source_path)
+    assert stats.source_messages == 1
+    assert stats.total_rows == 4
+    assert stats.imported_rows == 0
+    assert stats.error_rows == 0
 
 
 def test_single_workbot_row_with_multiple_names_is_split_by_employee(tmp_path: Path) -> None:
@@ -225,6 +231,7 @@ def test_multiple_products_without_allocation_require_manual_hours(tmp_path: Pat
     assert {row.hours for row in rows} == {0.0}
     assert {row.status for row in rows} == {STATUS_INVALID_HOURS}
     assert all("по каждому изделию" in row.error_message for row in rows)
+    assert service.inbox_stats(source_path).error_rows == 2
 
 
 def test_workbot_sync_is_idempotent_and_preserves_revisions(tmp_path: Path) -> None:

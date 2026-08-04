@@ -37,6 +37,14 @@ class WorkBotSource:
         assign_candidate_identity(candidates)
         return candidates
 
+    def message_count(self, path: Path) -> int:
+        connection = self._connect(path)
+        try:
+            self._validate_schema(connection)
+            return int(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
+        finally:
+            connection.close()
+
     def read_users(self, path: Path) -> list[WorkBotSourceUser]:
         if not path.is_file():
             raise ValueError("База WorkBot не найдена")

@@ -74,6 +74,10 @@ class WorkBotInboxWidget(QWidget):
         self.filter.addItem("Все статусы", "")
         for status, label in STATUS_LABELS.items():
             self.filter.addItem(label, status)
+        self.source_messages_count = QLabel("0")
+        self.total_rows_count = QLabel("0")
+        self.imported_rows_count = QLabel("0")
+        self.error_rows_count = QLabel("0")
 
         self.table = QTableWidget(0, 9)
         self.table.setHorizontalHeaderLabels(
@@ -135,6 +139,25 @@ class WorkBotInboxWidget(QWidget):
         filter_row.addWidget(QLabel("Показать"))
         filter_row.addWidget(self.filter)
         filter_row.addStretch()
+
+        summary_row = QHBoxLayout()
+        summary_row.setSpacing(24)
+        summary_row.addWidget(QLabel("Сообщений в MAX:"))
+        summary_row.addWidget(self.source_messages_count)
+        summary_row.addWidget(QLabel("Получено строк:"))
+        summary_row.addWidget(self.total_rows_count)
+        summary_row.addWidget(QLabel("Импортировано:"))
+        summary_row.addWidget(self.imported_rows_count)
+        summary_row.addWidget(QLabel("С ошибками:"))
+        summary_row.addWidget(self.error_rows_count)
+        summary_row.addStretch()
+        for value in (
+            self.source_messages_count,
+            self.total_rows_count,
+            self.imported_rows_count,
+            self.error_rows_count,
+        ):
+            value.setStyleSheet("font-weight: 600;")
 
         left = QWidget()
         left_layout = QVBoxLayout(left)
@@ -198,6 +221,7 @@ class WorkBotInboxWidget(QWidget):
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
         layout.addLayout(source_row)
+        layout.addLayout(summary_row)
         layout.addWidget(splitter)
 
     def _configure_table(self) -> None:
@@ -223,6 +247,7 @@ class WorkBotInboxWidget(QWidget):
 
     def set_source_path(self, value: str) -> None:
         self.source_path.setText(value)
+        self._refresh_stats()
 
     def set_reviewer(self, value: str) -> None:
         self.reviewer = value.strip()
@@ -249,6 +274,7 @@ class WorkBotInboxWidget(QWidget):
     def refresh(self) -> None:
         selected_id = self._selected_row_id()
         self.rows = self.service.list_rows(str(self.filter.currentData() or ""))
+        self._refresh_stats()
         self.table.setRowCount(len(self.rows))
         for row_index, row in enumerate(self.rows):
             values = [
@@ -294,6 +320,17 @@ class WorkBotInboxWidget(QWidget):
         if self.table.currentRow() < 0 and self.rows:
             self.table.selectRow(0)
 
+    def _refresh_stats(self) -> None:
+        source_path = Path(self.source_path.text().strip()) if self.source_path.text().strip() else None
+        try:
+            stats = self.service.inbox_stats(source_path)
+        except Exception:
+            stats = self.service.inbox_stats(None)
+        self.source_messages_count.setText(str(stats.source_messages))
+        self.total_rows_count.setText(str(stats.total_rows))
+        self.imported_rows_count.setText(str(stats.imported_rows))
+        self.error_rows_count.setText(str(stats.error_rows))
+
     def _choose_source(self) -> None:
         current = str(Path(self.source_path.text()).parent) if self.source_path.text() else ""
         file_name, _ = QFileDialog.getOpenFileName(
@@ -305,6 +342,7 @@ class WorkBotInboxWidget(QWidget):
         if file_name:
             self.source_path.setText(file_name)
             self.source_path_changed.emit(file_name)
+            self._refresh_stats()
 
     def _start_sync(self) -> None:
         value = self.source_path.text().strip()
@@ -385,7 +423,7 @@ class WorkBotInboxWidget(QWidget):
         self.hours.setText(format_hours(row.hours))
         self.description.setPlainText(row.work_types)
         self.issue.setText(row.error_message or "Соответствия найдены автоматически")
-        self.source_text.setPlainText(row.source_fragment or row.raw_text)
+        self.source_text.setPlainText(row.raw_text)
 
     def _import_selected(self) -> None:
         row = self._selected_row()

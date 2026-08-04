@@ -101,6 +101,14 @@ class WorkBotSyncResult:
     revised_messages: int
 
 
+@dataclass(frozen=True, slots=True)
+class WorkBotInboxStats:
+    source_messages: int
+    total_rows: int
+    imported_rows: int
+    error_rows: int
+
+
 @dataclass(slots=True)
 class WorkBotSourceUser:
     max_user_id: int

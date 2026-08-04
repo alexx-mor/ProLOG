@@ -18,6 +18,7 @@ from integrations.workbot.models import (
     STATUS_READY,
     STATUS_SOURCE_ERROR,
     WorkBotCandidate,
+    WorkBotInboxStats,
     WorkBotInboxRow,
     WorkBotSyncResult,
     WorkBotUserLink,
@@ -68,6 +69,13 @@ class WorkBotIntegrationService:
 
     def list_rows(self, status: str = "") -> list[WorkBotInboxRow]:
         return self.repository.list_rows(status)
+
+    def inbox_stats(self, source_path: Path | None) -> WorkBotInboxStats:
+        total_rows, imported_rows, error_rows = self.repository.inbox_counts()
+        source_messages = 0
+        if source_path is not None and source_path.is_file():
+            source_messages = self.source.message_count(source_path)
+        return WorkBotInboxStats(source_messages, total_rows, imported_rows, error_rows)
 
     def list_user_links(self, source_path: Path) -> list[WorkBotUserLink]:
         users = self.source.read_users(source_path)
@@ -250,9 +258,11 @@ class WorkBotIntegrationService:
         if candidate.employee_id is not None:
             return candidate.employee_id
         alias = aliases.get(normalize_alias(candidate.employee_text))
-        explicit = alias if alias is not None else _exact_id(candidate.employee_text, employees, "full_name")
+        explicit = alias if alias is not None else _employee_text_id(candidate.employee_text, employees)
         if explicit is not None:
             return explicit
+        if candidate.source_kind.startswith("historical") and candidate.employee_text.strip():
+            return None
         return bindings.get(candidate.sender_id)
 
     def _expand_product_candidates(
@@ -410,6 +420,23 @@ def _employee_references(full_name: str) -> list[str]:
         if initials:
             references.append(f"{parts[0]} {initials}")
     return references
+
+
+def _employee_text_id(value: str, employees: list[Employee]) -> int | None:
+    key = _compact_person_name(value)
+    if not key:
+        return None
+    matches = {
+        employee.id
+        for employee in employees
+        if employee.id is not None
+        and any(_compact_person_name(reference) == key for reference in _employee_references(employee.full_name))
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def _compact_person_name(value: str) -> str:
+    return re.sub(r"[^a-zа-я0-9]+", "", normalize_alias(value))
 
 
 _HOURS_MENTION_RE = re.compile(
