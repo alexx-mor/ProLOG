@@ -20,9 +20,20 @@ def detect_product(
     products: list[ProductItem],
     aliases: dict[str, int] | None = None,
 ) -> ProductMatch:
+    matches = detect_products(text, products, aliases)
+    if len(matches) != 1 or matches[0].ambiguous:
+        return ProductMatch(ambiguous=bool(matches))
+    return matches[0]
+
+
+def detect_products(
+    text: str,
+    products: list[ProductItem],
+    aliases: dict[str, int] | None = None,
+) -> list[ProductMatch]:
     normalized_text = _normalize(text)
     if not _compact(normalized_text):
-        return ProductMatch()
+        return []
     scored: dict[int, tuple[int, str]] = {}
     for alias, product_id in (aliases or {}).items():
         compact_alias = _compact(alias)
@@ -42,13 +53,19 @@ def detect_product(
             if len(compact_value) >= minimum and _contains_identifier(normalized_text, value):
                 scored[product.id] = max(scored.get(product.id, (0, "")), (score, value.strip()))
     if not scored:
-        return ProductMatch()
-    best_score = max(score for score, _reference in scored.values())
-    best = [product_id for product_id, (score, _reference) in scored.items() if score == best_score]
-    if len(best) != 1:
-        return ProductMatch(ambiguous=True)
-    product_id = best[0]
-    return ProductMatch(product_id, scored[product_id][1], False)
+        return []
+    reference_counts: dict[str, int] = {}
+    for _score, reference in scored.values():
+        key = normalize_product_alias(reference)
+        reference_counts[key] = reference_counts.get(key, 0) + 1
+    return [
+        ProductMatch(
+            product_id,
+            reference,
+            reference_counts[normalize_product_alias(reference)] > 1,
+        )
+        for product_id, (_score, reference) in sorted(scored.items())
+    ]
 
 
 def normalize_product_alias(value: str) -> str:

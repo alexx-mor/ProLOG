@@ -172,6 +172,7 @@ class MainWindow(QMainWindow):
         self.employee_widget.import_requested.connect(self.import_employees)
         self.employee_widget.export_requested.connect(self.export_employees)
         self.worklog_widget.save_requested.connect(self.save_worklog)
+        self.worklog_widget.entry_open_requested.connect(self.open_worklog_entry)
         self.worklog_widget.validation_failed.connect(self._warn)
         self.worklog_widget.objects_directory_requested.connect(self.open_objects_directory)
         self.report_viewer.filters_changed.connect(self.refresh_report_viewer)

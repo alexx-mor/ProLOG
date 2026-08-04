@@ -263,6 +263,9 @@ class WorkBotInboxWidget(QWidget):
                     "strict": "MAX",
                     "segmented": "MAX, пункт",
                     "historical": "История",
+                    "historical_segmented": "История, пункт",
+                    "employee_segmented": "MAX, сотрудники",
+                    "product_segmented": "MAX, изделие",
                     "unparsed": "Ошибка",
                 }.get(
                     row.source_kind, row.source_kind

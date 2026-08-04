@@ -1,5 +1,36 @@
 ﻿# Changelog
 
+## 2026-08-04 - Detailed WorkBot report allocation
+
+### Added
+
+- Double-clicking a row in `Выполненные работы сотрудника` now opens the saved
+  entry in the form and switches the action to `Сохранить изменения`.
+- One WorkBot message can produce separate incoming rows for every numbered work
+  item, explicitly named employee and uniquely identified product.
+- Multiple products in one work item receive their individual hours when the
+  message contains one hour value per product.
+- Items and products without an unambiguous time allocation remain in review
+  with zero hours and an explicit request to distribute the total manually.
+
+### Fixed
+
+- Historical WorkBot rows containing numbered items are now split using their
+  own source fragment instead of being excluded from segmentation.
+- An employee explicitly parsed from a report takes priority over the sender's
+  saved MAX binding, allowing one person to submit reports for a team.
+- Shared generic product names no longer trigger unsafe automatic allocation;
+  automatic splitting requires unique codes, serial numbers or aliases.
+- Bumped the application and Windows executable version to `0.5.2`.
+
+### Verified
+
+- All project tests pass: `33 passed`.
+- The supplied Жигалово/УНР message produces two rows with 5 and 3 hours in a
+  read-only scan of the current WorkBot database.
+- The current WorkBot database contains 219 historical work items that can now
+  be reviewed independently.
+
 ## 2026-08-03 - Multi-object WorkBot reports and month filters
 
 ### Added

@@ -10,7 +10,12 @@ import pytest
 
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from hours import format_hours, normalize_hours, parse_hours
-from integrations.workbot.models import STATUS_CHANGED, STATUS_NEEDS_EMPLOYEE, STATUS_READY
+from integrations.workbot.models import (
+    STATUS_CHANGED,
+    STATUS_INVALID_HOURS,
+    STATUS_NEEDS_EMPLOYEE,
+    STATUS_READY,
+)
 from integrations.workbot.models import WorkBotUserLink
 from integrations.workbot.matcher import detect_product
 from integrations.workbot.repository import WorkBotRepository
@@ -96,6 +101,130 @@ def test_numbered_message_is_split_by_object_and_hours(tmp_path: Path) -> None:
     assert [row.work_type_id for row in rows] == [assembly_id, connection_id]
     assert "Жигалово" in rows[0].source_fragment
     assert "УНР" in rows[1].source_fragment
+
+
+def test_historical_message_is_split_for_each_explicit_employee(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    fragment = (
+        "Иванов Иван Иванович\n"
+        "Петров Петр Петрович\n"
+        "1) Монтаж Жигалово ШУ-12 (5 часов)\n"
+        "2) Подключение УНР ШУФ 9 (3 часа)"
+    )
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("DELETE FROM reports")
+        connection.execute(
+            "UPDATE messages SET raw_text = ?, parse_status = 'parsed_legacy' WHERE max_message_id = 'message-1'",
+            (fragment,),
+        )
+        for source_index, employee_name in enumerate(
+            ("Иванов Иван Иванович", "Петров Петр Петрович")
+        ):
+            connection.execute(
+                """
+                INSERT INTO historical_reports (
+                    source_message_id, source_index, employee_name, work_date, work_types,
+                    hours, object_name, location, confidence, source_fragment, created_at
+                ) VALUES ('message-1', ?, ?, '2026-07-30', ?, 8, 'Жигалово; УНР',
+                          'Производство', 1, ?, '2026-07-30')
+                """,
+                (source_index, employee_name, fragment, fragment),
+            )
+    service, _worklogs, first_employee_id, _location_id, object_id, *_rest = _create_prolog(tmp_path)
+    second_employee_id = service.employees.save(Employee("Петров Петр Петрович", "Слесарь", "1"))
+    unr_id = service.directories.ensure("objects", "УНР")
+    service.directories.ensure("work_types", "Подключение")
+    service.directories.save_product(ProductItem(object_id=unr_id, name="ШУФ 9", code="ШУФ 9"))
+    service.repository.save_employee_binding(100, first_employee_id, "Отправитель")
+
+    result = service.sync(source_path)
+    rows = sorted(service.list_rows(), key=lambda item: item.source_index)
+
+    assert result.added_rows == 4
+    assert {row.source_kind for row in rows} == {"historical_segmented"}
+    assert [row.employee_id for row in rows] == [
+        first_employee_id,
+        first_employee_id,
+        second_employee_id,
+        second_employee_id,
+    ]
+    assert [row.object_id for row in rows] == [object_id, unr_id, object_id, unr_id]
+    assert [row.hours for row in rows] == [5.0, 3.0, 5.0, 3.0]
+
+
+def test_single_workbot_row_with_multiple_names_is_split_by_employee(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    message = (
+        "Иванов Иван Иванович\n"
+        "Петров Петр Петрович\n"
+        "Монтаж ШУ-12, 8 часов"
+    )
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("UPDATE messages SET raw_text = ? WHERE max_message_id = 'message-1'", (message,))
+        connection.execute(
+            "UPDATE reports SET work_types = 'Монтаж', hours = 8 WHERE source_message_id = 'message-1'"
+        )
+    service, _worklogs, first_employee_id, *_rest = _create_prolog(tmp_path)
+    second_employee_id = service.employees.save(Employee("Петров Петр Петрович", "Слесарь", "1"))
+    service.repository.save_employee_binding(100, first_employee_id, "Отправитель")
+
+    result = service.sync(source_path)
+    rows = service.list_rows()
+
+    assert result.added_rows == 2
+    assert {row.source_kind for row in rows} == {"employee_segmented"}
+    assert {row.employee_id for row in rows} == {first_employee_id, second_employee_id}
+    assert {row.hours for row in rows} == {8.0}
+    assert {row.status for row in rows} == {STATUS_READY}
+
+
+def test_multiple_products_get_separate_rows_and_explicit_hours(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    message = "Монтаж ШУ-12 3 часа; ШУ-13 5 часов"
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("UPDATE messages SET raw_text = ? WHERE max_message_id = 'message-1'", (message,))
+        connection.execute(
+            "UPDATE reports SET work_types = ?, hours = 8 WHERE source_message_id = 'message-1'",
+            (message,),
+        )
+    service, _worklogs, _employee_id, _location_id, object_id, *_rest = _create_prolog(tmp_path)
+    second_product_id = service.directories.save_product(
+        ProductItem(object_id=object_id, name="Второй шкаф", code="ШУ-13")
+    )
+
+    result = service.sync(source_path)
+    rows = service.list_rows()
+
+    assert result.added_rows == 2
+    assert {row.source_kind for row in rows} == {"product_segmented"}
+    assert {row.product_id for row in rows} == {_rest[-1], second_product_id}
+    assert sorted(row.hours for row in rows) == [3.0, 5.0]
+    assert {row.status for row in rows} == {STATUS_READY}
+
+
+def test_multiple_products_without_allocation_require_manual_hours(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    message = "Монтаж шкафов ШУ-12 и ШУ-13"
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("UPDATE messages SET raw_text = ? WHERE max_message_id = 'message-1'", (message,))
+        connection.execute(
+            "UPDATE reports SET work_types = ?, hours = 8 WHERE source_message_id = 'message-1'",
+            (message,),
+        )
+    service, _worklogs, _employee_id, _location_id, object_id, *_rest = _create_prolog(tmp_path)
+    service.directories.save_product(ProductItem(object_id=object_id, name="Второй шкаф", code="ШУ-13"))
+
+    service.sync(source_path)
+    rows = service.list_rows()
+
+    assert len(rows) == 2
+    assert {row.hours for row in rows} == {0.0}
+    assert {row.status for row in rows} == {STATUS_INVALID_HOURS}
+    assert all("по каждому изделию" in row.error_message for row in rows)
 
 
 def test_workbot_sync_is_idempotent_and_preserves_revisions(tmp_path: Path) -> None:

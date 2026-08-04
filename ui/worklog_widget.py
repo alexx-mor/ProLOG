@@ -47,6 +47,7 @@ class CalendarDateEdit(QDateEdit):
 
 class WorkLogWidget(QWidget):
     save_requested = Signal(object)
+    entry_open_requested = Signal(int)
     validation_failed = Signal(str)
     object_text_submitted = Signal(str)
     objects_directory_requested = Signal()
@@ -155,6 +156,7 @@ class WorkLogWidget(QWidget):
         self.today_button.clicked.connect(self.set_today)
         self.object.activated.connect(self._object_activated)
         self.object.currentIndexChanged.connect(lambda _index: self._sync_product_combo())
+        self.employee_entries.doubleClicked.connect(self._open_selected_entry)
 
     def set_employee(self, employee: Employee | None) -> None:
         self.employee = employee
@@ -228,6 +230,7 @@ class WorkLogWidget(QWidget):
 
     def load_entry(self, entry: WorkLogEntry) -> None:
         self.entry_id = entry.id
+        self.save_button.setText("Сохранить изменения")
         self.date_edit.setDate(QDate(entry.work_date.year, entry.work_date.month, entry.work_date.day))
         self._select_or_add(self.location, entry.location_id, entry.location_name)
         self._select_or_add(self.object, entry.object_id, entry.object_name)
@@ -239,6 +242,7 @@ class WorkLogWidget(QWidget):
 
     def clear_form(self) -> None:
         self.entry_id = None
+        self.save_button.setText("Сохранить запись")
         for combo in (self.location, self.object, self.product, self.work_type):
             combo.setCurrentIndex(0 if combo.count() else -1)
         self.description.clear()
@@ -258,8 +262,16 @@ class WorkLogWidget(QWidget):
             ]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
+                item.setData(Qt.ItemDataRole.UserRole, entry.id)
                 item.setToolTip(value)
                 self.employee_entries.setItem(row, column, item)
+
+    def _open_selected_entry(self) -> None:
+        row = self.employee_entries.currentRow()
+        item = self.employee_entries.item(row, 0) if row >= 0 else None
+        entry_id = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if isinstance(entry_id, int):
+            self.entry_open_requested.emit(entry_id)
 
     def select_object(self, object_id: int | None) -> None:
         self._select(self.object, object_id)

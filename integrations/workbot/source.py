@@ -34,7 +34,7 @@ class WorkBotSource:
             for row in rows
             for expanded in _expand_numbered_items(self._map(row))
         ]
-        self._assign_message_hashes(candidates)
+        assign_candidate_identity(candidates)
         return candidates
 
     def read_users(self, path: Path) -> list[WorkBotSourceUser]:
@@ -108,34 +108,6 @@ class WorkBotSource:
             error_message=str(row["source_error"] or "").strip(),
         )
 
-    def _assign_message_hashes(self, candidates: list[WorkBotCandidate]) -> None:
-        grouped: dict[str, list[WorkBotCandidate]] = defaultdict(list)
-        for candidate in candidates:
-            grouped[candidate.max_message_id].append(candidate)
-        for rows in grouped.values():
-            payload = {
-                "raw_text": rows[0].raw_text,
-                "rows": [
-                    {
-                        "index": row.source_index,
-                        "kind": row.source_kind,
-                        "employee": row.employee_text,
-                        "date": row.work_date.isoformat(),
-                        "work_types": row.work_types,
-                        "hours": row.hours,
-                        "object": row.object_text,
-                        "location": row.location_text,
-                    }
-                    for row in sorted(rows, key=lambda item: (item.source_kind, item.source_index))
-                ],
-            }
-            content_hash = hashlib.sha256(
-                json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
-            ).hexdigest()
-            for row in rows:
-                row.content_hash = content_hash
-
-
 _NUMBERED_ITEM_RE = re.compile(r"^\s*\d{1,2}\s*[.)]\s*(?P<body>.+?)\s*$")
 _ITEM_HOURS_RE = re.compile(
     r"\s*[([]?\s*(?P<hours>\d{1,2}(?:[.,]\d+)?)\s*"
@@ -145,33 +117,42 @@ _ITEM_HOURS_RE = re.compile(
 
 
 def _expand_numbered_items(candidate: WorkBotCandidate) -> list[WorkBotCandidate]:
-    if (
-        candidate.source_kind == "historical"
-        and candidate.source_fragment.strip() != candidate.raw_text.strip()
-    ):
-        return [candidate]
-    items: list[tuple[str, float]] = []
-    for line in candidate.raw_text.replace("\r", "").splitlines():
+    items: list[tuple[str, float | None, str]] = []
+    source_text = candidate.source_fragment or candidate.raw_text
+    for line in source_text.replace("\r", "").splitlines():
         item_match = _NUMBERED_ITEM_RE.match(line)
         if item_match is None:
             continue
         body = item_match.group("body").strip()
         hours_match = _ITEM_HOURS_RE.search(body)
-        hours = normalize_hours(hours_match.group("hours")) if hours_match else 0.0
+        hours = normalize_hours(hours_match.group("hours")) if hours_match else None
         description = _ITEM_HOURS_RE.sub("", body).strip(" .,:;-")
         if description:
-            items.append((description, hours))
+            items.append((description, hours, body))
     if len(items) < 2:
         return [candidate]
+    explicit_total = sum(hours for _description, hours, _body in items if hours is not None)
+    missing = [index for index, (_description, hours, _body) in enumerate(items) if hours is None]
+    inferred_hours: float | None = None
+    if len(missing) == 1 and explicit_total > 0 and candidate.hours > explicit_total:
+        inferred_hours = normalize_hours(candidate.hours - explicit_total)
+    allocation_note = ""
+    if missing and inferred_hours is None:
+        total_note = f" Общий итог сообщения: {candidate.hours:g} ч." if candidate.hours > 0 else ""
+        allocation_note = "Укажите часы для этого пункта вручную." + total_note
     return [
         replace(
             candidate,
-            source_index=index,
-            source_kind="segmented",
+            source_index=candidate.source_index,
+            source_kind=(
+                "historical_segmented"
+                if candidate.source_kind == "historical"
+                else "segmented"
+            ),
             work_types=description,
-            hours=hours,
+            hours=hours if hours is not None else (inferred_hours if index == missing[0] and inferred_hours else 0.0),
             object_text="",
-            source_fragment=description,
+            source_fragment=body,
             product_text="",
             content_hash="",
             employee_id=None,
@@ -179,10 +160,42 @@ def _expand_numbered_items(candidate: WorkBotCandidate) -> list[WorkBotCandidate
             location_id=None,
             work_type_id=None,
             product_id=None,
-            error_message="",
+            error_message=allocation_note if hours is None and inferred_hours is None else "",
         )
-        for index, (description, hours) in enumerate(items)
+        for index, (description, hours, body) in enumerate(items)
     ]
+
+
+def assign_candidate_identity(candidates: list[WorkBotCandidate]) -> None:
+    grouped: dict[str, list[WorkBotCandidate]] = defaultdict(list)
+    for candidate in candidates:
+        grouped[candidate.max_message_id].append(candidate)
+    for rows in grouped.values():
+        for source_index, row in enumerate(rows):
+            row.source_index = source_index
+        payload = {
+            "raw_text": rows[0].raw_text,
+            "rows": [
+                {
+                    "index": row.source_index,
+                    "kind": row.source_kind,
+                    "employee": row.employee_text,
+                    "date": row.work_date.isoformat(),
+                    "work_types": row.work_types,
+                    "hours": row.hours,
+                    "object": row.object_text,
+                    "location": row.location_text,
+                    "product": row.product_text,
+                    "fragment": row.source_fragment,
+                }
+                for row in rows
+            ],
+        }
+        content_hash = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        for row in rows:
+            row.content_hash = content_hash
 
 
 SOURCE_QUERY = """
