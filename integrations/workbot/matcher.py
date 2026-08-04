@@ -13,23 +13,33 @@ class ProductMatch:
     product_id: int | None = None
     reference: str = ""
     ambiguous: bool = False
+    score: int = 0
 
 
 def detect_product(
     text: str,
     products: list[ProductItem],
     aliases: dict[str, int] | None = None,
+    *,
+    allow_short_names: bool = False,
 ) -> ProductMatch:
-    matches = detect_products(text, products, aliases)
-    if len(matches) != 1 or matches[0].ambiguous:
+    matches = detect_products(text, products, aliases, allow_short_names=allow_short_names)
+    if not matches:
+        return ProductMatch()
+    ranked = sorted(matches, key=lambda match: match.score, reverse=True)
+    strongest = ranked[0]
+    same_score = [match for match in ranked if match.score == strongest.score]
+    if strongest.ambiguous or len(same_score) != 1:
         return ProductMatch(ambiguous=bool(matches))
-    return matches[0]
+    return strongest
 
 
 def detect_products(
     text: str,
     products: list[ProductItem],
     aliases: dict[str, int] | None = None,
+    *,
+    allow_short_names: bool = False,
 ) -> list[ProductMatch]:
     normalized_text = _normalize(text)
     if not _compact(normalized_text):
@@ -49,7 +59,7 @@ def detect_products(
         )
         for value, score in identifiers:
             compact_value = _compact(value)
-            minimum = 3 if score >= 100 else 6
+            minimum = 3 if score >= 100 or allow_short_names else 6
             if len(compact_value) >= minimum and _contains_identifier(normalized_text, value):
                 scored[product.id] = max(scored.get(product.id, (0, "")), (score, value.strip()))
     if not scored:
@@ -63,8 +73,9 @@ def detect_products(
             product_id,
             reference,
             reference_counts[normalize_product_alias(reference)] > 1,
+            score,
         )
-        for product_id, (_score, reference) in sorted(scored.items())
+        for product_id, (score, reference) in sorted(scored.items())
     ]
 
 

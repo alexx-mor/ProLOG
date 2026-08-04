@@ -1,5 +1,31 @@
 ﻿# Changelog
 
+## 2026-08-04 - Context-aware WorkBot products and ordered directories
+
+### Added
+
+- WorkBot resolves a short product name inside the already matched object, so
+  `Жигалово ШУВ` selects the `ШУВ` product attached to `Жигалово`.
+- An explicit product serial number has priority over conflicting object text and
+  restores the object from the product card.
+- Locations and work types can now be moved up and down, and their custom order
+  is preserved in SQLite.
+
+### Fixed
+
+- The incoming-report product selector now contains only products attached to
+  the currently selected object.
+- Incoming-report counters remain compact and top-aligned without pushing the
+  table down on large and 4K displays.
+- Database and alias directory icons now use a transparent background.
+- Bumped the application and Windows executable version to `0.5.4`.
+
+### Verified
+
+- All project tests pass: `38 passed`.
+- Context matching, serial-number priority, object-scoped product filtering and
+  manual directory ordering are covered by regression tests.
+
 ## 2026-08-04 - WorkBot employee matching and inbox metrics
 
 ### Added

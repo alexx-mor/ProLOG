@@ -349,6 +349,14 @@ class Database:
             connection.execute(
                 "ALTER TABLE products_db.Products ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
             )
+        for table in ("Locations", "WorkTypes"):
+            columns = {
+                row["name"] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+            if "sort_order" not in columns:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+                )
         worklog_columns = {row["name"] for row in connection.execute("PRAGMA table_info(WorkLogEntries)")}
         if "product_id" not in worklog_columns:
             connection.execute("ALTER TABLE WorkLogEntries ADD COLUMN product_id INTEGER")
@@ -380,6 +388,8 @@ class Database:
             (STUDENT_CATEGORY, LEGACY_STUDENT_CATEGORY),
         )
         self._normalize_sort_order(connection, OBJECTS_TABLE, "name COLLATE NOCASE, id")
+        self._normalize_sort_order(connection, "Locations", "name COLLATE NOCASE, id")
+        self._normalize_sort_order(connection, "WorkTypes", "name COLLATE NOCASE, id")
         self._normalize_product_sort_order(connection)
         self._sync_pay_rates(connection)
 
@@ -403,11 +413,11 @@ class Database:
                         (value, existing_id),
                     )
                 else:
-                    if table == OBJECTS_TABLE:
+                    if table in {OBJECTS_TABLE, "Locations", "WorkTypes"}:
                         cursor = connection.execute(
                             f"""
-                            INSERT INTO {OBJECTS_TABLE} (name, sort_order)
-                            VALUES (?, COALESCE((SELECT MAX(sort_order) + 1 FROM {OBJECTS_TABLE}), 1))
+                            INSERT INTO {table} (name, sort_order)
+                            VALUES (?, COALESCE((SELECT MAX(sort_order) + 1 FROM {table}), 1))
                             """,
                             (value,),
                         )
@@ -532,7 +542,7 @@ class DirectoryRepository:
         sql = f"SELECT {fields} FROM {table}"
         if active_only:
             sql += " WHERE is_active = 1"
-        if table_key == "objects":
+        if table_key in {"objects", "locations", "work_types"}:
             sql += " ORDER BY sort_order, name COLLATE NOCASE, id"
         with self.database.connect() as connection:
             items = [
@@ -557,7 +567,7 @@ class DirectoryRepository:
                 )
                 for row in connection.execute(sql)
             ]
-        if table_key == "objects":
+        if table_key in {"objects", "locations", "work_types"}:
             return items
         return sorted(items, key=lambda item: item.name.casefold())
 
@@ -579,10 +589,10 @@ class DirectoryRepository:
                 )
 
     def move(self, table_key: str, item_id: int, direction: int) -> None:
-        if table_key != "objects":
-            raise ValueError("Ручной порядок поддерживается только для объектов и изделий")
+        if table_key not in {"objects", "locations", "work_types"}:
+            raise ValueError("Ручной порядок для этого справочника не поддерживается")
         with self.database.connect() as connection:
-            self._move_ordered_row(connection, OBJECTS_TABLE, item_id, direction)
+            self._move_ordered_row(connection, self._table(table_key), item_id, direction)
 
     def ui_setting(self, key: str, default: str = "") -> str:
         with self.database.connect() as connection:
@@ -721,6 +731,15 @@ class DirectoryRepository:
                     f"""
                     INSERT INTO {OBJECTS_TABLE} (name, is_active, sort_order)
                     VALUES (?, 1, COALESCE((SELECT MAX(sort_order) + 1 FROM {OBJECTS_TABLE}), 1))
+                    ON CONFLICT(name) DO UPDATE SET is_active = 1
+                    """,
+                    (normalized,),
+                )
+            elif table_key in {"locations", "work_types"}:
+                connection.execute(
+                    f"""
+                    INSERT INTO {table} (name, is_active, sort_order)
+                    VALUES (?, 1, COALESCE((SELECT MAX(sort_order) + 1 FROM {table}), 1))
                     ON CONFLICT(name) DO UPDATE SET is_active = 1
                     """,
                     (normalized,),
@@ -1555,7 +1574,8 @@ MAIN_SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS WorkTypes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    is_active INTEGER NOT NULL DEFAULT 1
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS Positions (
@@ -1592,7 +1612,8 @@ CREATE TABLE IF NOT EXISTS PayRates (
 CREATE TABLE IF NOT EXISTS Locations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
-    is_active INTEGER NOT NULL DEFAULT 1
+    is_active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS WorkLogEntries (

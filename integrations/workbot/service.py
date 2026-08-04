@@ -205,11 +205,30 @@ class WorkBotIntegrationService:
         if candidate.product_id is not None:
             product_match = ProductMatch(candidate.product_id, candidate.product_text, False)
         else:
+            product_text = "\n".join(value for value in product_sources if value)
             product_match = detect_product(
-                "\n".join(value for value in product_sources if value),
+                product_text,
                 products,
                 aliases["product"],
             )
+            if candidate.object_id is not None and product_match.product_id is None:
+                scoped_products = [
+                    product for product in products if product.object_id == candidate.object_id
+                ]
+                scoped_product_ids = {product.id for product in scoped_products}
+                scoped_aliases = {
+                    alias: product_id
+                    for alias, product_id in aliases["product"].items()
+                    if product_id in scoped_product_ids
+                }
+                scoped_match = detect_product(
+                    product_text,
+                    scoped_products,
+                    scoped_aliases,
+                    allow_short_names=True,
+                )
+                if scoped_match.product_id is not None:
+                    product_match = scoped_match
             candidate.product_id = product_match.product_id
             candidate.product_text = product_match.reference
         product = _by_id(products, candidate.product_id)
@@ -217,9 +236,14 @@ class WorkBotIntegrationService:
             if candidate.object_id is None:
                 candidate.object_id = product.object_id
             elif candidate.object_id != product.object_id:
-                candidate.status = STATUS_PRODUCT_CONFLICT
-                candidate.error_message = "Проверьте изделие: оно относится к другому объекту"
-                return
+                if product_match.score >= 110:
+                    candidate.object_id = product.object_id
+                    product_object = _by_id(objects, product.object_id)
+                    candidate.object_text = product_object.name if product_object else ""
+                else:
+                    candidate.status = STATUS_PRODUCT_CONFLICT
+                    candidate.error_message = "Проверьте изделие: оно относится к другому объекту"
+                    return
         elif product_match.ambiguous:
             candidate.error_message = "В сообщении найдено несколько возможных изделий; выберите изделие вручную"
         if candidate.employee_id is None:
@@ -274,8 +298,12 @@ class WorkBotIntegrationService:
         expanded: list[WorkBotCandidate] = []
         for candidate in candidates:
             text = candidate.source_fragment or candidate.work_types or candidate.raw_text
-            matches = detect_products(text, products, aliases)
-            if len(matches) <= 1 or any(match.ambiguous for match in matches):
+            matches = [
+                match
+                for match in detect_products(text, products, aliases)
+                if not match.ambiguous
+            ]
+            if len(matches) <= 1:
                 expanded.append(candidate)
                 continue
             allocations = _product_hour_allocations(text, matches)

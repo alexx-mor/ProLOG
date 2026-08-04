@@ -127,7 +127,11 @@ class WorkBotInboxWidget(QWidget):
         self._connect()
 
     def _build_layout(self) -> None:
-        source_row = QHBoxLayout()
+        self.source_bar = QWidget()
+        self.source_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.source_bar.setMaximumHeight(42)
+        source_row = QHBoxLayout(self.source_bar)
+        source_row.setContentsMargins(0, 0, 0, 0)
         source_row.addWidget(QLabel("База WorkBot"))
         source_row.addWidget(self.source_path, 1)
         source_row.addWidget(self.choose_source)
@@ -140,7 +144,11 @@ class WorkBotInboxWidget(QWidget):
         filter_row.addWidget(self.filter)
         filter_row.addStretch()
 
-        summary_row = QHBoxLayout()
+        self.summary_bar = QWidget()
+        self.summary_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.summary_bar.setMaximumHeight(30)
+        summary_row = QHBoxLayout(self.summary_bar)
+        summary_row.setContentsMargins(0, 0, 0, 0)
         summary_row.setSpacing(24)
         summary_row.addWidget(QLabel("Сообщений в MAX:"))
         summary_row.addWidget(self.source_messages_count)
@@ -209,20 +217,20 @@ class WorkBotInboxWidget(QWidget):
         editor_scroll.setMaximumWidth(860)
         editor_scroll.setWidget(editor_host)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(left)
-        splitter.addWidget(editor_scroll)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes([760, 500])
-        splitter.setChildrenCollapsible(False)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.addWidget(left)
+        self.splitter.addWidget(editor_scroll)
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 2)
+        self.splitter.setSizes([760, 500])
+        self.splitter.setChildrenCollapsible(False)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 8, 14, 14)
         layout.setSpacing(10)
-        layout.addLayout(source_row)
-        layout.addLayout(summary_row)
-        layout.addWidget(splitter)
+        layout.addWidget(self.source_bar, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.summary_bar, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(self.splitter, 1)
 
     def _configure_table(self) -> None:
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -244,6 +252,7 @@ class WorkBotInboxWidget(QWidget):
         self.import_button.clicked.connect(self._import_selected)
         self.reject_button.clicked.connect(self._reject_selected)
         self.product.currentIndexChanged.connect(self._product_changed)
+        self.object.currentIndexChanged.connect(self._object_changed)
 
     def set_source_path(self, value: str) -> None:
         self.source_path.setText(value)
@@ -480,17 +489,24 @@ class WorkBotInboxWidget(QWidget):
             combo.addItem(str(getattr(item, text_attr)), item.id)
         self._select_combo(combo, current)
 
-    def _fill_product_combo(self) -> None:
-        current = self.product.currentData()
+    def _fill_product_combo(self, selected_product_id: int | None = None) -> None:
+        current = selected_product_id if selected_product_id is not None else self.product.currentData()
+        object_id = self.object.currentData()
         self.product.clear()
         self.product.addItem("Без изделия", None)
         for product in self.products:
+            if not isinstance(object_id, int) or product.object_id != object_id:
+                continue
             details = " / ".join(value for value in (product.serial_number, product.code) if value)
             label = f"{product.object_name} — {product.name}"
             if details:
                 label += f" ({details})"
             self.product.addItem(label, product.id)
         self._select_combo(self.product, current)
+        self.product.setEnabled(isinstance(object_id, int))
+
+    def _object_changed(self) -> None:
+        self._fill_product_combo()
 
     def _product_changed(self) -> None:
         product_id = self.product.currentData()

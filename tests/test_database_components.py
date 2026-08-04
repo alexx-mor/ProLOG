@@ -71,6 +71,29 @@ def test_legacy_component_rows_move_without_changing_ids(tmp_path: Path) -> None
     assert all(item.original_alias != "ШУ 31" for item in repository.list_aliases())
 
 
+def test_locations_and_work_types_keep_manual_order(tmp_path: Path) -> None:
+    database = Database(tmp_path / "prolog.sqlite3")
+    database.initialize()
+    repository = DirectoryRepository(database)
+
+    for table_key, first_name, second_name in (
+        ("locations", "Тестовое место А", "Тестовое место Б"),
+        ("work_types", "Тестовая работа А", "Тестовая работа Б"),
+    ):
+        first_id = repository.upsert(table_key, first_name)
+        second_id = repository.upsert(table_key, second_name)
+        before = [item.id for item in repository.list_items(table_key, active_only=False)]
+        assert before.index(first_id) + 1 == before.index(second_id)
+
+        repository.move(table_key, second_id, -1)
+        after = [item.id for item in repository.list_items(table_key, active_only=False)]
+        assert after.index(second_id) + 1 == after.index(first_id)
+
+        reloaded = DirectoryRepository(Database(database.path))
+        persisted = [item.id for item in reloaded.list_items(table_key, active_only=False)]
+        assert persisted.index(second_id) + 1 == persisted.index(first_id)
+
+
 def _create_legacy_database(path: Path) -> None:
     connection = sqlite3.connect(path)
     connection.executescript(

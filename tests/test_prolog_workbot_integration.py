@@ -49,6 +49,77 @@ def test_product_is_detected_by_code() -> None:
         [ProductItem(id=13, object_id=4, name="Шкаф 3", code="ШУ3")],
     )
     assert lower_case.product_id == 13
+    serial_priority = detect_product(
+        "Шкаф управления 2323",
+        [
+            ProductItem(id=14, object_id=4, name="Шкаф управления"),
+            ProductItem(id=15, object_id=5, name="Шкаф управления", serial_number="2323"),
+        ],
+    )
+    assert serial_priority.product_id == 15
+
+
+def test_short_product_name_is_resolved_inside_matched_object(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    message = "31.07.26\nКеренцев Ф.В\nГазетная 23\nСборка Жигалово шув\n8-17"
+    with sqlite3.connect(source_path) as connection:
+        connection.execute(
+            "UPDATE messages SET raw_text = ? WHERE max_message_id = 'message-1'",
+            (message,),
+        )
+        connection.execute(
+            "UPDATE reports SET work_types = ?, object_name = 'Жигалово', hours = 8 "
+            "WHERE source_message_id = 'message-1'",
+            (message,),
+        )
+    service, _worklogs, _employee_id, _location_id, object_id, *_rest = _create_prolog(tmp_path)
+    other_object_id = service.directories.ensure("objects", "Другой объект")
+    expected_product_id = service.directories.save_product(
+        ProductItem(object_id=object_id, name="ШУВ", serial_number="3080")
+    )
+    service.directories.save_product(
+        ProductItem(object_id=other_object_id, name="ШУВ", serial_number="2323")
+    )
+
+    service.sync(source_path)
+    row = service.list_rows()[0]
+
+    assert row.object_id == object_id
+    assert row.product_id == expected_product_id
+    assert row.raw_text == message
+
+
+def test_product_serial_number_overrides_conflicting_object_text(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    message = "Сборка Жигалово шув 2323, 8 часов"
+    with sqlite3.connect(source_path) as connection:
+        connection.execute(
+            "UPDATE messages SET raw_text = ? WHERE max_message_id = 'message-1'",
+            (message,),
+        )
+        connection.execute(
+            "UPDATE reports SET work_types = ?, object_name = 'Жигалово', hours = 8 "
+            "WHERE source_message_id = 'message-1'",
+            (message,),
+        )
+    service, _worklogs, _employee_id, _location_id, object_id, *_rest = _create_prolog(tmp_path)
+    other_object_id = service.directories.ensure("objects", "Другой объект")
+    service.directories.save_product(
+        ProductItem(object_id=object_id, name="ШУВ", serial_number="3080")
+    )
+    expected_product_id = service.directories.save_product(
+        ProductItem(object_id=other_object_id, name="ШУВ", serial_number="2323")
+    )
+
+    service.sync(source_path)
+    row = service.list_rows()[0]
+
+    assert row.object_id == other_object_id
+    assert row.product_id == expected_product_id
+    assert row.object_text == "Другой объект"
+    assert row.raw_text == message
 
 
 def test_numbered_message_is_split_by_object_and_hours(tmp_path: Path) -> None:

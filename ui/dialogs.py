@@ -1874,7 +1874,7 @@ class DirectoryDialog(QDialog):
         self.refresh()
 
     def _move_selected(self, direction: int) -> None:
-        if self.current_key not in {"objects", "products"}:
+        if self.current_key not in {"locations", "work_types", "objects", "products"}:
             return
         item_id = self._selected_id()
         if item_id is None:
@@ -2010,7 +2010,7 @@ class DirectoryDialog(QDialog):
         move_down_action.triggered.connect(lambda: self._move_selected(1))
         menu.addAction(add_action)
         menu.addAction(rename_action)
-        if self.current_key in {"objects", "products"}:
+        if self.current_key in {"locations", "work_types", "objects", "products"}:
             menu.addSeparator()
             menu.addAction(move_up_action)
             menu.addAction(move_down_action)
@@ -2213,7 +2213,7 @@ class DirectoryDialog(QDialog):
             not is_pay_rates and not is_calendar and not is_databases and not is_aliases
         )
         self.delete_button.setVisible(not is_pay_rates and not is_calendar)
-        is_ordered = self.current_key in {"objects", "products"}
+        is_ordered = self.current_key in {"locations", "work_types", "objects", "products"}
         self.move_up_button.setVisible(is_ordered)
         self.move_down_button.setVisible(is_ordered)
         self.use_database_button.setVisible(is_databases)
