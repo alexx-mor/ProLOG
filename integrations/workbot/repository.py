@@ -344,26 +344,82 @@ class WorkBotRepository:
                     (row["sender_id"], entry.employee_id, now, now),
                 )
             if remember_aliases:
-                self._remember_alias(connection, "aliases_db.EmployeeAliases", "employee_id", row["employee_text"], entry.employee_id, now)
-                self._remember_alias(connection, "aliases_db.ObjectAliases", "object_id", row["object_text"], entry.object_id, now)
-                self._remember_alias(connection, "aliases_db.LocationAliases", "location_id", row["location_text"], entry.location_id, now)
-                self._remember_alias(
+                self._remember_correction(
+                    connection,
+                    "aliases_db.EmployeeAliases",
+                    "employee_id",
+                    row["employee_text"],
+                    row["employee_id"],
+                    entry.employee_id,
+                    now,
+                )
+                self._remember_correction(
+                    connection,
+                    "aliases_db.ObjectAliases",
+                    "object_id",
+                    row["object_text"],
+                    row["object_id"],
+                    entry.object_id,
+                    now,
+                )
+                self._remember_correction(
+                    connection,
+                    "aliases_db.LocationAliases",
+                    "location_id",
+                    row["location_text"],
+                    row["location_id"],
+                    entry.location_id,
+                    now,
+                )
+                self._remember_correction(
                     connection,
                     "aliases_db.WorkTypeAliases",
                     "work_type_id",
                     row["work_types"],
+                    row["work_type_id"],
                     entry.work_type_id,
                     now,
+                    require_concise_text=True,
                 )
-                self._remember_alias(
-                    connection,
-                    "aliases_db.ProductAliases",
-                    "product_id",
-                    product_alias_text or row["product_text"],
-                    entry.product_id,
-                    now,
+                product_source = product_alias_text or row["product_text"]
+                product_text_changed = normalize_alias(product_source) != normalize_alias(
+                    row["product_text"]
                 )
+                if entry.product_id != row["product_id"] or product_text_changed:
+                    self._remember_alias(
+                        connection,
+                        "aliases_db.ProductAliases",
+                        "product_id",
+                        product_source,
+                        entry.product_id,
+                        now,
+                    )
             return worklog_id
+
+    def _remember_correction(
+        self,
+        connection: sqlite3.Connection,
+        table: str,
+        target_column: str,
+        original: str,
+        detected_target_id: int | None,
+        selected_target_id: int | None,
+        now: str,
+        *,
+        require_concise_text: bool = False,
+    ) -> None:
+        if selected_target_id == detected_target_id:
+            return
+        if require_concise_text and not _is_concise_alias(original):
+            return
+        self._remember_alias(
+            connection,
+            table,
+            target_column,
+            original,
+            selected_target_id,
+            now,
+        )
 
     def _remember_alias(
         self,
@@ -422,6 +478,11 @@ class WorkBotRepository:
 
 def normalize_alias(value: str) -> str:
     return " ".join(value.replace("ё", "е").replace("Ё", "Е").casefold().split())
+
+
+def _is_concise_alias(value: str) -> bool:
+    normalized = normalize_alias(value)
+    return bool(normalized) and len(normalized) <= 80 and len(normalized.split()) <= 8
 
 
 def _now() -> str:

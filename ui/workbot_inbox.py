@@ -116,8 +116,12 @@ class WorkBotInboxWidget(QWidget):
         self.source_text.setReadOnly(True)
         self.source_text.setMinimumHeight(200)
         self.source_text.setMaximumHeight(280)
-        self.remember = QCheckBox("Запомнить подтвержденные соответствия")
+        self.remember = QCheckBox("Запоминать исправленные соответствия")
         self.remember.setChecked(True)
+        self.remember.setToolTip(
+            "Создавать алиасы только для значений, которые не были определены "
+            "автоматически или были изменены вручную"
+        )
         self.import_button = QPushButton("Подтвердить и импортировать")
         self.reject_button = QPushButton("Отклонить")
         self.import_button.setEnabled(False)

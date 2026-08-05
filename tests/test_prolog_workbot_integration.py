@@ -385,6 +385,75 @@ def test_imported_manual_links_survive_repeated_sync(tmp_path: Path) -> None:
     assert imported_row.work_type_id == manual_work_type_id
 
 
+def test_only_manually_corrected_workbot_values_become_aliases(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    service, _worklogs, employee_id, location_id, _object_id, _work_type_id, _product_id = (
+        _create_prolog(tmp_path)
+    )
+    service.sync(source_path)
+    row = service.list_rows()[0]
+    corrected_object_id = service.directories.ensure("objects", "Исправленный объект")
+    corrected_work_type_id = service.directories.ensure(
+        "work_types", "Исправленный вид работ"
+    )
+
+    service.import_row(
+        row.id,
+        employee_id=employee_id,
+        work_date=row.work_date,
+        location_id=location_id,
+        object_id=corrected_object_id,
+        work_type_id=corrected_work_type_id,
+        product_id=None,
+        description="Исправленный вид работ",
+        hours=7.5,
+        remember=True,
+    )
+
+    aliases = service.directories.list_aliases()
+    assert {(alias.alias_type, alias.target_id) for alias in aliases} == {
+        ("object", corrected_object_id),
+        ("work_type", corrected_work_type_id),
+    }
+
+
+def test_long_work_description_is_not_saved_as_work_type_alias(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    long_description = (
+        "Прокладка сигнальных проводов, подключение шкафов, установка контакторов "
+        "и проверка оборудования после завершения монтажных работ"
+    )
+    with sqlite3.connect(source_path) as connection:
+        connection.execute(
+            "UPDATE reports SET work_types = ? WHERE source_message_id = 'message-1'",
+            (long_description,),
+        )
+    service, _worklogs, employee_id, location_id, object_id, work_type_id, product_id = (
+        _create_prolog(tmp_path)
+    )
+    service.sync(source_path)
+    row = service.list_rows()[0]
+
+    service.import_row(
+        row.id,
+        employee_id=employee_id,
+        work_date=row.work_date,
+        location_id=location_id,
+        object_id=object_id,
+        work_type_id=work_type_id,
+        product_id=product_id,
+        description=long_description,
+        hours=7.5,
+        remember=True,
+    )
+
+    assert not any(
+        alias.alias_type == "work_type" for alias in service.directories.list_aliases()
+    )
+
+
 def test_deleting_imported_worklog_reopens_workbot_row(tmp_path: Path) -> None:
     source_path = tmp_path / "workbot.sqlite3"
     _create_workbot_source(source_path)
@@ -446,6 +515,7 @@ def test_workbot_sync_is_idempotent_and_preserves_revisions(tmp_path: Path) -> N
     imported = worklogs.get(worklog_id)
     assert imported.hours == 7.5
     assert imported.product_id == product_id
+    assert service.directories.list_aliases() == []
     with pytest.raises(ValueError, match="уже импортирован"):
         service.import_row(
             row.id,

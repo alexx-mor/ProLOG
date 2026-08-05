@@ -1,5 +1,22 @@
 ﻿# Changelog
 
+## 2026-08-05 - Selective WorkBot alias learning
+
+### Changed
+
+- Renamed the incoming-report option to `Запоминать исправленные соответствия`.
+- WorkBot now creates aliases only when the user changes an automatically
+  detected value or resolves a value that ProLOG could not detect.
+- Long work descriptions are never stored as work-type aliases.
+- Existing useful aliases remain unchanged; no user data is removed.
+- Bumped the application and Windows executable version to `0.5.6`.
+
+### Verified
+
+- All project tests pass: `48 passed`.
+- Regression tests cover clean imports, selective correction learning and
+  protection against aliases made from full work descriptions.
+
 ## 2026-08-05 - Wrapped table headers and reliable WorkBot review
 
 ### Added
