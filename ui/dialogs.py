@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import webbrowser
 import os
+import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -1015,6 +1016,18 @@ class DirectoryDialog(QDialog):
         self.product_object_filter.setView(QListView())
         self.product_object_filter.setMinimumWidth(280)
         self.product_object_filter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.product_sort = QComboBox()
+        self.product_sort.addItem("Заданный порядок", "manual")
+        self.product_sort.addItem("Заводской номер: по возрастанию", "serial_asc")
+        self.product_sort.addItem("Заводской номер: по убыванию", "serial_desc")
+        self.product_sort.addItem("Готовность: по возрастанию", "readiness_asc")
+        self.product_sort.addItem("Готовность: по убыванию", "readiness_desc")
+        saved_product_sort = self.directory_service.ui_setting(
+            "directory/products/sort",
+            "manual",
+        )
+        saved_sort_index = self.product_sort.findData(saved_product_sort)
+        self.product_sort.setCurrentIndex(saved_sort_index if saved_sort_index >= 0 else 0)
         self.calendar_panel = QWidget()
         self.calendar_year = QSpinBox()
         self.calendar_year.setRange(2000, 2100)
@@ -1099,7 +1112,9 @@ class DirectoryDialog(QDialog):
                     )
                 )
             ]
+            self._items = _sort_products(self._items, str(self.product_sort.currentData()))
             self._refresh_products()
+            self._update_button_visibility()
             return
         self._items = [
             item
@@ -1414,6 +1429,8 @@ class DirectoryDialog(QDialog):
         product_filter_layout.setContentsMargins(0, 0, 0, 0)
         product_filter_layout.addWidget(QLabel("Объект"))
         product_filter_layout.addWidget(self.product_object_filter, 1)
+        product_filter_layout.addWidget(QLabel("Сортировка"))
+        product_filter_layout.addWidget(self.product_sort)
         product_filter_layout.addStretch()
 
         calendar_top = QHBoxLayout()
@@ -1494,6 +1511,7 @@ class DirectoryDialog(QDialog):
         self.table.doubleClicked.connect(self._toggle_selected_active)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.product_object_filter.currentIndexChanged.connect(self.refresh)
+        self.product_sort.currentIndexChanged.connect(self._product_sort_changed)
         self.calendar_year.valueChanged.connect(self._calendar_year_changed)
         self.calendar_import_button.clicked.connect(self._import_calendar_year)
 
@@ -1526,6 +1544,13 @@ class DirectoryDialog(QDialog):
         self.directory_service.set_ui_setting(
             f"directory/show_inactive/{self.current_key}",
             "1" if checked else "0",
+        )
+        self.refresh()
+
+    def _product_sort_changed(self) -> None:
+        self.directory_service.set_ui_setting(
+            "directory/products/sort",
+            str(self.product_sort.currentData() or "manual"),
         )
         self.refresh()
 
@@ -1876,14 +1901,23 @@ class DirectoryDialog(QDialog):
     def _move_selected(self, direction: int) -> None:
         if self.current_key not in {"locations", "work_types", "objects", "products"}:
             return
+        if self.current_key == "products" and self.product_sort.currentData() != "manual":
+            self._info("Для ручного перемещения выберите сортировку «Заданный порядок»")
+            return
         item_id = self._selected_id()
         if item_id is None:
             self._info("Выберите строку")
             return
+        active_only = not self.show_inactive.isChecked()
         if self.current_key == "products":
-            self.directory_service.move_product(item_id, direction)
+            self.directory_service.move_product(item_id, direction, active_only=active_only)
         else:
-            self.directory_service.move(self.current_key, item_id, direction)
+            self.directory_service.move(
+                self.current_key,
+                item_id,
+                direction,
+                active_only=active_only,
+            )
         self.refresh()
         self._select_row_by_id(item_id)
 
@@ -2010,7 +2044,15 @@ class DirectoryDialog(QDialog):
         move_down_action.triggered.connect(lambda: self._move_selected(1))
         menu.addAction(add_action)
         menu.addAction(rename_action)
-        if self.current_key in {"locations", "work_types", "objects", "products"}:
+        manual_order_available = self.current_key in {
+            "locations",
+            "work_types",
+            "objects",
+            "products",
+        }
+        if self.current_key == "products" and self.product_sort.currentData() != "manual":
+            manual_order_available = False
+        if manual_order_available:
             menu.addSeparator()
             menu.addAction(move_up_action)
             menu.addAction(move_down_action)
@@ -2214,6 +2256,8 @@ class DirectoryDialog(QDialog):
         )
         self.delete_button.setVisible(not is_pay_rates and not is_calendar)
         is_ordered = self.current_key in {"locations", "work_types", "objects", "products"}
+        if self.current_key == "products" and self.product_sort.currentData() != "manual":
+            is_ordered = False
         self.move_up_button.setVisible(is_ordered)
         self.move_down_button.setVisible(is_ordered)
         self.use_database_button.setVisible(is_databases)
@@ -2717,6 +2761,41 @@ class TextInputDialog(QDialog):
 
     def value(self) -> str:
         return self.input.text()
+
+
+def _sort_products(items: list[ProductItem], mode: str) -> list[ProductItem]:
+    if mode == "manual":
+        return items
+    if mode.startswith("serial_"):
+        with_serial = [item for item in items if item.serial_number.strip()]
+        without_serial = [item for item in items if not item.serial_number.strip()]
+        ordered = sorted(
+            with_serial,
+            key=lambda item: (
+                _natural_sort_key(item.serial_number),
+                _natural_sort_key(item.name),
+            ),
+            reverse=mode.endswith("_desc"),
+        )
+        return ordered + without_serial
+    else:
+        ordered = sorted(
+            items,
+            key=lambda item: (
+                item.readiness_percent,
+                _natural_sort_key(item.serial_number),
+            ),
+        )
+    return list(reversed(ordered)) if mode.endswith("_desc") else ordered
+
+
+def _natural_sort_key(value: str) -> tuple[tuple[int, object], ...]:
+    parts = re.split(r"(\d+)", value.casefold().strip())
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in parts
+        if part
+    )
 
 
 HELP_HTML = f"""

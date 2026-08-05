@@ -12,8 +12,10 @@ from database import Database, DirectoryRepository, EmployeeRepository, WorkLogR
 from hours import format_hours, normalize_hours, parse_hours
 from integrations.workbot.models import (
     STATUS_CHANGED,
+    STATUS_IMPORTED,
     STATUS_INVALID_HOURS,
     STATUS_NEEDS_EMPLOYEE,
+    STATUS_NEEDS_WORK_TYPE,
     STATUS_READY,
 )
 from integrations.workbot.models import WorkBotUserLink
@@ -303,6 +305,114 @@ def test_multiple_products_without_allocation_require_manual_hours(tmp_path: Pat
     assert {row.status for row in rows} == {STATUS_INVALID_HOURS}
     assert all("по каждому изделию" in row.error_message for row in rows)
     assert service.inbox_stats(source_path).error_rows == 2
+
+
+def test_short_product_names_are_split_inside_message_object(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    message = "Монтаж Жигалово ШУ5 и ШУ2, всего 8 часов"
+    with sqlite3.connect(source_path) as connection:
+        connection.execute(
+            "UPDATE messages SET raw_text = ? WHERE max_message_id = 'message-1'",
+            (message,),
+        )
+        connection.execute(
+            "UPDATE reports SET work_types = ?, object_name = 'Жигалово', hours = 8 "
+            "WHERE source_message_id = 'message-1'",
+            (message,),
+        )
+    service, _worklogs, _employee_id, _location_id, object_id, *_rest = _create_prolog(tmp_path)
+    first_id = service.directories.save_product(ProductItem(object_id=object_id, name="ШУ5"))
+    second_id = service.directories.save_product(ProductItem(object_id=object_id, name="ШУ2"))
+    other_object_id = service.directories.ensure("objects", "Другой объект")
+    service.directories.save_product(ProductItem(object_id=other_object_id, name="ШУ5"))
+
+    service.sync(source_path)
+    rows = service.list_rows()
+
+    assert len(rows) == 2
+    assert {row.product_id for row in rows} == {first_id, second_id}
+    assert {row.object_id for row in rows} == {object_id}
+    assert {row.status for row in rows} == {STATUS_INVALID_HOURS}
+    assert all(row.raw_text == message for row in rows)
+
+
+def test_inactive_work_type_is_not_offered_to_workbot(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    service, _worklogs, _employee_id, _location_id, _object_id, work_type_id, _product_id = (
+        _create_prolog(tmp_path)
+    )
+    service.directories.save_alias(AliasItem("work_type", "Монтаж", work_type_id))
+    service.directories.set_active("work_types", work_type_id, False)
+
+    service.sync(source_path)
+    row = service.list_rows()[0]
+
+    assert row.work_type_id is None
+    assert row.status == STATUS_NEEDS_WORK_TYPE
+
+
+def test_imported_manual_links_survive_repeated_sync(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    service, worklogs, employee_id, location_id, _object_id, _work_type_id, _product_id = (
+        _create_prolog(tmp_path)
+    )
+    service.sync(source_path)
+    row = service.list_rows()[0]
+    manual_object_id = service.directories.ensure("objects", "Электроцех (Газетная 23)")
+    manual_work_type_id = service.directories.ensure("work_types", "Общепроизводственные")
+    worklog_id = service.import_row(
+        row.id,
+        employee_id=employee_id,
+        work_date=row.work_date,
+        location_id=location_id,
+        object_id=manual_object_id,
+        work_type_id=manual_work_type_id,
+        product_id=None,
+        description="Общепроизводственные работы",
+        hours=7.5,
+        remember=False,
+    )
+
+    service.sync(source_path)
+    imported_row = service.list_rows()[0]
+
+    assert worklogs.get(worklog_id) is not None
+    assert imported_row.status == STATUS_IMPORTED
+    assert imported_row.object_id == manual_object_id
+    assert imported_row.work_type_id == manual_work_type_id
+
+
+def test_deleting_imported_worklog_reopens_workbot_row(tmp_path: Path) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    service, worklogs, employee_id, location_id, object_id, work_type_id, product_id = (
+        _create_prolog(tmp_path)
+    )
+    service.sync(source_path)
+    row = service.list_rows()[0]
+    worklog_id = service.import_row(
+        row.id,
+        employee_id=employee_id,
+        work_date=row.work_date,
+        location_id=location_id,
+        object_id=object_id,
+        work_type_id=work_type_id,
+        product_id=product_id,
+        description="Монтаж",
+        hours=7.5,
+        remember=False,
+    )
+
+    worklogs.delete(worklog_id)
+    reopened = service.list_rows()[0]
+
+    assert worklogs.get(worklog_id) is None
+    assert reopened.status == STATUS_READY
+    assert reopened.worklog_entry_id is None
+    assert "повторно" in reopened.error_message
 
 
 def test_workbot_sync_is_idempotent_and_preserves_revisions(tmp_path: Path) -> None:

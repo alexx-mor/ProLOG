@@ -80,8 +80,15 @@ class DirectoryService:
     def delete(self, key: str, item_id: int) -> None:
         self.repository.delete(key, item_id)
 
-    def move(self, key: str, item_id: int, direction: int) -> None:
-        self.repository.move(key, item_id, direction)
+    def move(
+        self,
+        key: str,
+        item_id: int,
+        direction: int,
+        *,
+        active_only: bool = False,
+    ) -> None:
+        self.repository.move(key, item_id, direction, active_only=active_only)
 
     def ui_setting(self, key: str, default: str = "") -> str:
         return self.repository.ui_setting(key, default)
@@ -127,8 +134,14 @@ class DirectoryService:
     def delete_product(self, product_id: int) -> None:
         self.repository.delete_product(product_id)
 
-    def move_product(self, product_id: int, direction: int) -> None:
-        self.repository.move_product(product_id, direction)
+    def move_product(
+        self,
+        product_id: int,
+        direction: int,
+        *,
+        active_only: bool = False,
+    ) -> None:
+        self.repository.move_product(product_id, direction, active_only=active_only)
 
     def list_pay_rates(self):
         return self.repository.list_pay_rates()
@@ -328,6 +341,10 @@ class WorkLogService:
 
     def get(self, entry_id: int) -> WorkLogEntry | None:
         return self.worklogs.get(entry_id)
+
+    def delete(self, entry_id: int) -> bool:
+        self.worklogs.delete(entry_id)
+        return True
 
     def duplicate_last(self, employee_id: int, target_date: date) -> WorkLogEntry | None:
         last = self.worklogs.last_for_employee(employee_id)

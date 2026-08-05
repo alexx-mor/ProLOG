@@ -59,6 +59,7 @@ class WorkBotRepository:
                                 updated_at = ?
                             WHERE max_message_id = ? AND revision = ?
                               AND source_index = ? AND source_kind = ?
+                              AND status NOT IN ('imported', 'rejected', 'changed_after_import')
                             """,
                             (
                                 row.employee_id,

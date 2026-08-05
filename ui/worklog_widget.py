@@ -48,6 +48,7 @@ class CalendarDateEdit(QDateEdit):
 class WorkLogWidget(QWidget):
     save_requested = Signal(object)
     entry_open_requested = Signal(int)
+    entry_delete_requested = Signal(int)
     validation_failed = Signal(str)
     object_text_submitted = Signal(str)
     objects_directory_requested = Signal()
@@ -91,6 +92,8 @@ class WorkLogWidget(QWidget):
         self.clear_button.setMinimumWidth(160)
         self.employee_entries_title = QLabel("Выполненные работы сотрудника")
         self.employee_entries_title.setObjectName("SectionTitle")
+        self.delete_entry_button = QPushButton("Удалить выбранную")
+        self.delete_entry_button.setEnabled(False)
         self.employee_entries = QTableWidget(0, 6)
         self.employee_entries.setHorizontalHeaderLabels(["Дата", "Объект", "Изделие", "Вид работ", "Описание", "Часы"])
         self.employee_entries.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -147,7 +150,11 @@ class WorkLogWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 14, 10, 10)
         layout.addWidget(form_group)
-        layout.addWidget(self.employee_entries_title)
+        entries_header = QHBoxLayout()
+        entries_header.addWidget(self.employee_entries_title)
+        entries_header.addStretch()
+        entries_header.addWidget(self.delete_entry_button)
+        layout.addLayout(entries_header)
         layout.addWidget(self.employee_entries, 1)
 
         self.set_employee(None)
@@ -157,6 +164,10 @@ class WorkLogWidget(QWidget):
         self.object.activated.connect(self._object_activated)
         self.object.currentIndexChanged.connect(lambda _index: self._sync_product_combo())
         self.employee_entries.doubleClicked.connect(self._open_selected_entry)
+        self.employee_entries.itemSelectionChanged.connect(
+            lambda: self.delete_entry_button.setEnabled(self._selected_entry_id() is not None)
+        )
+        self.delete_entry_button.clicked.connect(self._delete_selected_entry)
 
     def set_employee(self, employee: Employee | None) -> None:
         self.employee = employee
@@ -267,11 +278,20 @@ class WorkLogWidget(QWidget):
                 self.employee_entries.setItem(row, column, item)
 
     def _open_selected_entry(self) -> None:
+        entry_id = self._selected_entry_id()
+        if entry_id is not None:
+            self.entry_open_requested.emit(entry_id)
+
+    def _delete_selected_entry(self) -> None:
+        entry_id = self._selected_entry_id()
+        if entry_id is not None:
+            self.entry_delete_requested.emit(entry_id)
+
+    def _selected_entry_id(self) -> int | None:
         row = self.employee_entries.currentRow()
         item = self.employee_entries.item(row, 0) if row >= 0 else None
         entry_id = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-        if isinstance(entry_id, int):
-            self.entry_open_requested.emit(entry_id)
+        return entry_id if isinstance(entry_id, int) else None
 
     def select_object(self, object_id: int | None) -> None:
         self._select(self.object, object_id)

@@ -28,6 +28,7 @@ from ui.period_filter import PeriodFilterWidget
 class ReportViewerWidget(QWidget):
     filters_changed = Signal()
     entry_open_requested = Signal(int)
+    entry_delete_requested = Signal(int)
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,6 +41,8 @@ class ReportViewerWidget(QWidget):
         self.period = PeriodFilterWidget()
         self.apply_button = QPushButton("Показать")
         self.clear_button = QPushButton("Сбросить")
+        self.delete_button = QPushButton("Удалить выбранную")
+        self.delete_button.setEnabled(False)
         self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(
             ["Дата", "Сотрудник", "Объект", "Изделие", "Вид работ", "Описание", "Часы", "Комментарий"]
@@ -120,6 +123,7 @@ class ReportViewerWidget(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(self.apply_button)
         buttons.addWidget(self.clear_button)
+        buttons.addWidget(self.delete_button)
         buttons.addStretch()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -135,6 +139,10 @@ class ReportViewerWidget(QWidget):
         self.employee.currentIndexChanged.connect(lambda _index: self.filters_changed.emit())
         self.object.currentIndexChanged.connect(lambda _index: self.filters_changed.emit())
         self.table.doubleClicked.connect(self._open_selected_entry)
+        self.table.itemSelectionChanged.connect(
+            lambda: self.delete_button.setEnabled(self._selected_entry_id() is not None)
+        )
+        self.delete_button.clicked.connect(self._delete_selected_entry)
 
     def _clear_filters(self) -> None:
         self.employee.setCurrentIndex(0)
@@ -147,13 +155,22 @@ class ReportViewerWidget(QWidget):
         combo.setCurrentIndex(index if index >= 0 else 0)
 
     def _open_selected_entry(self) -> None:
+        entry_id = self._selected_entry_id()
+        if entry_id is not None:
+            self.entry_open_requested.emit(entry_id)
+
+    def _delete_selected_entry(self) -> None:
+        entry_id = self._selected_entry_id()
+        if entry_id is not None:
+            self.entry_delete_requested.emit(entry_id)
+
+    def _selected_entry_id(self) -> int | None:
         row = self.table.currentRow()
         if row < 0:
-            return
+            return None
         item = self.table.item(row, 0)
         entry_id = item.data(256) if item else None
-        if entry_id:
-            self.entry_open_requested.emit(int(entry_id))
+        return int(entry_id) if entry_id else None
 
     def _fit_columns(self) -> None:
         widths = [90, 180, 150, 160, 180, 280, 70, 220]

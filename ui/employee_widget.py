@@ -48,8 +48,7 @@ class EmployeeWidget(QWidget):
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["ФИО", "Должность", "Разряд/категория"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(2, 90)
+        self.table.setColumnWidth(2, 120)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -59,6 +58,9 @@ class EmployeeWidget(QWidget):
         self.delete_button = QPushButton("Удалить")
         self.import_button = QPushButton("Импорт Excel")
         self.export_button = QPushButton("Экспорт сотрудников")
+        self._columns_fitted = False
+        self._adjusting_columns = False
+        self._manual_column_widths = False
 
         button_layout = QHBoxLayout()
         for button in (self.add_button, self.edit_button, self.delete_button, self.import_button, self.export_button):
@@ -81,6 +83,7 @@ class EmployeeWidget(QWidget):
         self.table.itemSelectionChanged.connect(self._emit_selected)
         self.table.doubleClicked.connect(lambda: self._emit_edit())
         self.table.customContextMenuRequested.connect(self._show_context_menu)
+        self.table.horizontalHeader().sectionResized.connect(self._column_resized)
         self.add_button.clicked.connect(self.add_requested)
         self.edit_button.clicked.connect(self._emit_edit)
         self.delete_button.clicked.connect(self._emit_delete)
@@ -101,7 +104,9 @@ class EmployeeWidget(QWidget):
                 item.setData(256, employee.id)
                 item.setToolTip(value)
                 self.table.setItem(row, column, item)
-        self._fit_columns_to_width()
+        if not self._columns_fitted:
+            self._fit_columns_to_width()
+            self._columns_fitted = True
 
     def set_position_filter_options(self, positions) -> None:
         current = self.position_filter.currentData()
@@ -154,15 +159,23 @@ class EmployeeWidget(QWidget):
 
     def apply_column_widths(self, widths: list[int]) -> None:
         effective_widths = widths[1:] if len(widths) == 4 else widths
+        applied = False
+        self._adjusting_columns = True
         for column, width in enumerate(effective_widths[: self.table.columnCount()]):
-            if width > 0 and column != 2:
+            if width > 0:
                 self.table.setColumnWidth(column, width)
-        self.table.setColumnWidth(2, 90)
-        self._fit_columns_to_width()
+                applied = True
+        self._adjusting_columns = False
+        self._manual_column_widths = applied
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._fit_columns_to_width()
+        if not self._manual_column_widths:
+            self._fit_columns_to_width()
+
+    def _column_resized(self, _column: int, _old_size: int, _new_size: int) -> None:
+        if not self._adjusting_columns and self.isVisible():
+            self._manual_column_widths = True
 
     def _emit_selected(self) -> None:
         employee = self.current_employee()
@@ -212,8 +225,10 @@ class EmployeeWidget(QWidget):
         if self.table.columnCount() != 3:
             return
         available_width = max(self.table.viewport().width() - 6, 260)
-        category_width = 100
+        category_width = 120
         remaining = max(available_width - category_width, 160)
+        self._adjusting_columns = True
         self.table.setColumnWidth(0, int(remaining * 0.55))
         self.table.setColumnWidth(1, remaining - int(remaining * 0.55))
         self.table.setColumnWidth(2, category_width)
+        self._adjusting_columns = False

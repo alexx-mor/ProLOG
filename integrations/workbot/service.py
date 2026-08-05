@@ -7,7 +7,12 @@ from pathlib import Path
 import re
 
 from hours import normalize_hours
-from integrations.workbot.matcher import ProductMatch, detect_product, detect_products
+from integrations.workbot.matcher import (
+    ProductMatch,
+    detect_product,
+    detect_products,
+    normalize_product_alias,
+)
 from integrations.workbot.models import (
     STATUS_INVALID_HOURS,
     STATUS_NEEDS_EMPLOYEE,
@@ -51,17 +56,38 @@ class WorkBotIntegrationService:
     def sync(self, source_path: Path) -> WorkBotSyncResult:
         candidates = self.source.read_candidates(source_path)
         employees = self.employees.list()
-        objects = self.directories.list_all("objects")
-        locations = self.directories.list_all("locations")
-        work_types = self.directories.list_all("work_types")
-        products = self.directories.list_products(active_only=False)
+        objects = self.directories.list("objects")
+        locations = self.directories.list("locations")
+        work_types = self.directories.list("work_types")
+        products = self.directories.list_products(active_only=True)
         bindings = self.repository.employee_bindings()
         aliases = {
             alias_type: self.repository.alias_targets(alias_type)
             for alias_type in ("employee", "object", "location", "work_type", "product")
         }
+        active_target_ids = {
+            "employee": {item.id for item in employees},
+            "object": {item.id for item in objects},
+            "location": {item.id for item in locations},
+            "work_type": {item.id for item in work_types},
+            "product": {item.id for item in products},
+        }
+        aliases = {
+            alias_type: {
+                alias: target_id
+                for alias, target_id in values.items()
+                if target_id in active_target_ids[alias_type]
+            }
+            for alias_type, values in aliases.items()
+        }
         candidates = self._expand_employee_candidates(candidates, employees, aliases["employee"])
-        candidates = self._expand_product_candidates(candidates, products, aliases["product"])
+        candidates = self._expand_product_candidates(
+            candidates,
+            products,
+            aliases["product"],
+            objects,
+            aliases["object"],
+        )
         assign_candidate_identity(candidates)
         for candidate in candidates:
             self._resolve(candidate, employees, objects, locations, work_types, products, bindings, aliases)
@@ -203,7 +229,24 @@ class WorkBotIntegrationService:
         if "segmented" not in candidate.source_kind:
             product_sources.append(candidate.raw_text)
         if candidate.product_id is not None:
-            product_match = ProductMatch(candidate.product_id, candidate.product_text, False)
+            selected_product = _by_id(products, candidate.product_id)
+            selected_aliases = {
+                alias: product_id
+                for alias, product_id in aliases["product"].items()
+                if product_id == candidate.product_id
+            }
+            product_match = detect_product(
+                "\n".join(value for value in product_sources if value),
+                [selected_product] if selected_product is not None else [],
+                selected_aliases,
+                allow_short_names=True,
+            )
+            if product_match.product_id is None:
+                product_match = ProductMatch(
+                    candidate.product_id,
+                    candidate.product_text,
+                    False,
+                )
         else:
             product_text = "\n".join(value for value in product_sources if value)
             product_match = detect_product(
@@ -294,15 +337,52 @@ class WorkBotIntegrationService:
         candidates: list[WorkBotCandidate],
         products: list[ProductItem],
         aliases: dict[str, int],
+        objects: list[DirectoryItem],
+        object_aliases: dict[str, int],
     ) -> list[WorkBotCandidate]:
         expanded: list[WorkBotCandidate] = []
+        products_by_id = {product.id: product for product in products}
         for candidate in candidates:
             text = candidate.source_fragment or candidate.work_types or candidate.raw_text
-            matches = [
-                match
+            matches_by_id = {
+                match.product_id: match
                 for match in detect_products(text, products, aliases)
-                if not match.ambiguous
-            ]
+                if match.product_id is not None and not match.ambiguous
+            }
+            strong_product_names = {
+                normalize_product_alias(products_by_id[product_id].name)
+                for product_id, match in matches_by_id.items()
+                if match.score >= 100
+                and product_id in products_by_id
+                and products_by_id[product_id].name.strip()
+            }
+            object_id = self._directory_id(candidate.object_text, objects, object_aliases)
+            if object_id is None:
+                object_id = _mentioned_id(text, objects, object_aliases)
+            if object_id is not None:
+                scoped_products = [product for product in products if product.object_id == object_id]
+                scoped_ids = {product.id for product in scoped_products}
+                scoped_aliases = {
+                    alias: product_id
+                    for alias, product_id in aliases.items()
+                    if product_id in scoped_ids
+                }
+                for match in detect_products(
+                    text,
+                    scoped_products,
+                    scoped_aliases,
+                    allow_short_names=True,
+                ):
+                    if match.product_id is not None and not match.ambiguous:
+                        if (
+                            match.score < 100
+                            and normalize_product_alias(match.reference) in strong_product_names
+                        ):
+                            continue
+                        previous = matches_by_id.get(match.product_id)
+                        if previous is None or match.score > previous.score:
+                            matches_by_id[match.product_id] = match
+            matches = list(matches_by_id.values())
             if len(matches) <= 1:
                 expanded.append(candidate)
                 continue

@@ -173,10 +173,12 @@ class MainWindow(QMainWindow):
         self.employee_widget.export_requested.connect(self.export_employees)
         self.worklog_widget.save_requested.connect(self.save_worklog)
         self.worklog_widget.entry_open_requested.connect(self.open_worklog_entry)
+        self.worklog_widget.entry_delete_requested.connect(self.delete_worklog_entry)
         self.worklog_widget.validation_failed.connect(self._warn)
         self.worklog_widget.objects_directory_requested.connect(self.open_objects_directory)
         self.report_viewer.filters_changed.connect(self.refresh_report_viewer)
         self.report_viewer.entry_open_requested.connect(self.open_worklog_entry)
+        self.report_viewer.entry_delete_requested.connect(self.delete_worklog_entry)
         self.analytics_widget.filters_changed.connect(self.refresh_analytics)
         self.workbot_inbox.source_path_changed.connect(self._save_workbot_source_path)
         self.workbot_inbox.imported.connect(self.refresh_worklogs)
@@ -284,10 +286,10 @@ class MainWindow(QMainWindow):
     def _refresh_workbot_reference_data(self) -> None:
         self.workbot_inbox.set_reference_data(
             self.employees.list(),
-            self.directories.list_all("locations"),
-            self.directories.list_all("objects"),
-            self.directories.list_all("work_types"),
-            self.directories.list_products(active_only=False),
+            self.directories.list("locations"),
+            self.directories.list("objects"),
+            self.directories.list("work_types"),
+            self.directories.list_products(active_only=True),
         )
 
     def _save_workbot_source_path(self, value: str) -> None:
@@ -481,6 +483,25 @@ class MainWindow(QMainWindow):
         self.worklog_widget.load_entry(entry)
         self.tabs.setCurrentIndex(0)
         self.statusBar().showMessage("Запись открыта для редактирования", 5000)
+
+    def delete_worklog_entry(self, entry_id: int) -> None:
+        entry = self.worklogs.get(entry_id)
+        if entry is None:
+            self._warn("Запись не найдена")
+            return
+        details = entry.description.strip() or entry.work_type_name or "без описания"
+        if not self._ask(
+            "Удалить запись",
+            f"Удалить запись от {entry.work_date.strftime('%d.%m.%Y')} «{details}»?",
+        ):
+            return
+        deleted = self._run(lambda: self.worklogs.delete(entry_id), "Запись удалена")
+        if not deleted:
+            return
+        if self.worklog_widget.entry_id == entry_id:
+            self.worklog_widget.clear_form()
+        self.refresh_worklogs()
+        self.workbot_inbox.refresh()
 
     def export_report(self) -> None:
         if not self._require_access(MODULE_REPORT_EXPORT):

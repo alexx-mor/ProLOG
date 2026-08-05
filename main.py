@@ -15,6 +15,7 @@ from ui.style import APP_STYLESHEET
 from ui.auth_dialogs import LoginDialog, RegistrationDialog
 from ui.main_window import MainWindow
 from utils import ensure_app_directories, setup_logging
+from ui.table_headers import install_table_header_support
 
 
 def install_exception_hook() -> None:
@@ -42,6 +43,7 @@ def main() -> int:
     setup_logging()
     install_exception_hook()
     app = QApplication(sys.argv)
+    app._table_header_installer = install_table_header_support(app)
     app.setStyleSheet(APP_STYLESHEET)
     settings = ConfigManager().load()
     database = Database(

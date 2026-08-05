@@ -1,5 +1,32 @@
 ﻿# Changelog
 
+## 2026-08-05 - Wrapped table headers and reliable WorkBot review
+
+### Added
+
+- Table headers throughout ProLOG now wrap at word boundaries when a column is
+  narrowed; the employee rank/category column is resizable and persisted.
+- The product directory can be sorted naturally by serial number or by readiness
+  percentage in either direction.
+- Saved work-log rows can be deleted from the employee table and report viewer;
+  linked WorkBot rows become available for correction and re-import.
+- Short product references such as `ШУ5` and `ШУ2` are split within the matched
+  object without mixing identically named products from other objects.
+
+### Fixed
+
+- Moving rows while inactive entries are hidden now skips those hidden entries.
+- WorkBot uses only active locations, objects, work types, products and aliases.
+- Rechecking an unchanged imported MAX message no longer overwrites the object,
+  work type or other values confirmed by the user.
+- Bumped the application and Windows executable version to `0.5.5`.
+
+### Verified
+
+- All project tests pass: `46 passed`.
+- Regression tests cover wrapped headers, hidden-row movement, product sorting,
+  active-directory filtering, preserved manual links, deletion and short products.
+
 ## 2026-08-04 - Context-aware WorkBot products and ordered directories
 
 ### Added

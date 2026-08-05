@@ -36,3 +36,31 @@ def test_double_click_handler_requests_saved_entry() -> None:
     assert opened == [42]
     widget.close()
     app.processEvents()
+
+
+def test_delete_button_requests_selected_entry() -> None:
+    app = QApplication.instance() or QApplication([])
+    widget = WorkLogWidget()
+    deleted: list[int] = []
+    widget.entry_delete_requested.connect(deleted.append)
+    widget.set_employee_entries(
+        [
+            WorkLogEntry(
+                id=77,
+                employee_id=7,
+                work_date=date(2026, 8, 5),
+                location_id=None,
+                object_id=None,
+                work_type_id=None,
+                description="Ошибочная запись",
+                hours=8,
+            )
+        ]
+    )
+    widget.employee_entries.selectRow(0)
+
+    widget._delete_selected_entry()
+
+    assert deleted == [77]
+    widget.close()
+    app.processEvents()

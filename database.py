@@ -588,11 +588,24 @@ class DirectoryRepository:
                     (normalized, old_name),
                 )
 
-    def move(self, table_key: str, item_id: int, direction: int) -> None:
+    def move(
+        self,
+        table_key: str,
+        item_id: int,
+        direction: int,
+        *,
+        active_only: bool = False,
+    ) -> None:
         if table_key not in {"objects", "locations", "work_types"}:
             raise ValueError("Ручной порядок для этого справочника не поддерживается")
         with self.database.connect() as connection:
-            self._move_ordered_row(connection, self._table(table_key), item_id, direction)
+            self._move_ordered_row(
+                connection,
+                self._table(table_key),
+                item_id,
+                direction,
+                active_only=active_only,
+            )
 
     def ui_setting(self, key: str, default: str = "") -> str:
         with self.database.connect() as connection:
@@ -1048,7 +1061,13 @@ class DirectoryRepository:
             )
             connection.execute(f"DELETE FROM {PRODUCTS_TABLE} WHERE id = ?", (product_id,))
 
-    def move_product(self, product_id: int, direction: int) -> None:
+    def move_product(
+        self,
+        product_id: int,
+        direction: int,
+        *,
+        active_only: bool = False,
+    ) -> None:
         with self.database.connect() as connection:
             row = connection.execute(
                 f"SELECT object_id FROM {PRODUCTS_TABLE} WHERE id = ?",
@@ -1063,6 +1082,7 @@ class DirectoryRepository:
                 direction,
                 scope_column="object_id",
                 scope_value=row["object_id"],
+                active_only=active_only,
             )
 
     def _move_ordered_row(
@@ -1073,6 +1093,7 @@ class DirectoryRepository:
         direction: int,
         scope_column: str = "",
         scope_value: object | None = None,
+        active_only: bool = False,
     ) -> None:
         if direction not in (-1, 1):
             raise ValueError("Направление перемещения должно быть -1 или 1")
@@ -1089,6 +1110,7 @@ class DirectoryRepository:
         comparison = "<" if direction < 0 else ">"
         ordering = "DESC" if direction < 0 else "ASC"
         scope_clause = f" AND {scope_column} = ?" if scope_column else ""
+        active_clause = " AND is_active = 1" if active_only else ""
         neighbor_params: tuple[object, ...] = (row["sort_order"],)
         if scope_column:
             neighbor_params += (scope_value,)
@@ -1096,7 +1118,7 @@ class DirectoryRepository:
             f"""
             SELECT id, sort_order
             FROM {table}
-            WHERE sort_order {comparison} ?{scope_clause}
+            WHERE sort_order {comparison} ?{scope_clause}{active_clause}
             ORDER BY sort_order {ordering}, id {ordering}
             LIMIT 1
             """,
@@ -1508,6 +1530,27 @@ class WorkLogRepository:
         with self.database.connect() as connection:
             row = connection.execute(WORKLOG_SELECT + " WHERE w.id = ?", (entry_id,)).fetchone()
             return self._map(row) if row else None
+
+    def delete(self, entry_id: int) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.database.connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM WorkLogEntries WHERE id = ?",
+                (entry_id,),
+            ).fetchone()
+            if exists is None:
+                raise ValueError("Запись журнала не найдена")
+            connection.execute(
+                """
+                UPDATE WorkBotImportRows
+                SET status = 'ready', worklog_entry_id = NULL, imported_at = NULL,
+                    error_message = 'Запись удалена из журнала; можно импортировать повторно',
+                    updated_at = ?
+                WHERE worklog_entry_id = ?
+                """,
+                (now, entry_id),
+            )
+            connection.execute("DELETE FROM WorkLogEntries WHERE id = ?", (entry_id,))
 
     def last_for_employee(self, employee_id: int) -> WorkLogEntry | None:
         with self.database.connect() as connection:

@@ -94,6 +94,23 @@ def test_locations_and_work_types_keep_manual_order(tmp_path: Path) -> None:
         assert persisted.index(second_id) + 1 == persisted.index(first_id)
 
 
+def test_move_skips_hidden_inactive_rows(tmp_path: Path) -> None:
+    database = Database(tmp_path / "prolog.sqlite3")
+    database.initialize()
+    repository = DirectoryRepository(database)
+    first_id = repository.upsert("work_types", "Проверка порядка А")
+    hidden_id = repository.upsert("work_types", "Проверка порядка Б")
+    second_id = repository.upsert("work_types", "Проверка порядка В")
+    repository.set_active("work_types", hidden_id, False)
+
+    repository.move("work_types", first_id, 1, active_only=True)
+
+    visible_ids = [item.id for item in repository.list_items("work_types")]
+    all_ids = [item.id for item in repository.list_items("work_types", active_only=False)]
+    assert visible_ids.index(second_id) < visible_ids.index(first_id)
+    assert all_ids.index(second_id) < all_ids.index(hidden_id) < all_ids.index(first_id)
+
+
 def _create_legacy_database(path: Path) -> None:
     connection = sqlite3.connect(path)
     connection.executescript(
