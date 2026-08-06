@@ -49,6 +49,7 @@ class Employee:
     status: str = EmployeeStatus.ACTIVE.value
     id: int | None = None
     mobile_phone: str = ""
+    hire_date: str = ""
 
 
 @dataclass(slots=True)

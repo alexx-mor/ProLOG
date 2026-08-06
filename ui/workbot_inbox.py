@@ -104,18 +104,18 @@ class WorkBotInboxWidget(QWidget):
             )
         )
         self.description = QTextEdit()
-        self.description.setMinimumHeight(170)
-        self.description.setMaximumHeight(240)
+        self.description.setMinimumHeight(140)
+        self.description.setMaximumHeight(205)
         self.issue = QLabel()
         self.issue.setWordWrap(True)
-        self.issue.setMinimumHeight(44)
-        self.issue.setMaximumHeight(72)
+        self.issue.setMinimumHeight(28)
+        self.issue.setMaximumHeight(48)
         self.issue.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.issue.setStyleSheet("color: #a63b2b;")
         self.source_text = QTextEdit()
         self.source_text.setReadOnly(True)
-        self.source_text.setMinimumHeight(200)
-        self.source_text.setMaximumHeight(280)
+        self.source_text.setMinimumHeight(160)
+        self.source_text.setMaximumHeight(230)
         self.remember = QCheckBox("Запоминать исправленные соответствия")
         self.remember.setChecked(True)
         self.remember.setToolTip(
@@ -182,7 +182,7 @@ class WorkBotInboxWidget(QWidget):
         form = QFormLayout(editor)
         form.setContentsMargins(12, 0, 0, 0)
         form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
-        form.setVerticalSpacing(8)
+        form.setVerticalSpacing(5)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.addRow("Сотрудник", self.employee)
         form.addRow("Дата", self.work_date)
@@ -214,16 +214,16 @@ class WorkBotInboxWidget(QWidget):
         editor_host_layout.setContentsMargins(0, 0, 0, 0)
         editor_host_layout.addWidget(editor, 0, Qt.AlignmentFlag.AlignTop)
         editor_host_layout.addStretch()
-        editor_scroll = QScrollArea()
-        editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        editor_scroll.setWidgetResizable(True)
-        editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        editor_scroll.setMaximumWidth(860)
-        editor_scroll.setWidget(editor_host)
+        self.editor_scroll = QScrollArea()
+        self.editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.editor_scroll.setWidgetResizable(True)
+        self.editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.editor_scroll.setMaximumWidth(860)
+        self.editor_scroll.setWidget(editor_host)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.addWidget(left)
-        self.splitter.addWidget(editor_scroll)
+        self.splitter.addWidget(self.editor_scroll)
         self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 2)
         self.splitter.setSizes([760, 500])
@@ -286,52 +286,63 @@ class WorkBotInboxWidget(QWidget):
 
     def refresh(self) -> None:
         selected_id = self._selected_row_id()
+        selected_index = self.table.currentRow()
         self.rows = self.service.list_rows(str(self.filter.currentData() or ""))
         self._refresh_stats()
-        self.table.setRowCount(len(self.rows))
-        for row_index, row in enumerate(self.rows):
-            values = [
-                STATUS_LABELS.get(row.status, row.status),
-                row.work_date.strftime("%d.%m.%Y"),
-                self._employee_name(row.employee_id, row.employee_text),
-                self._directory_name(row.object_id, row.object_text, self.objects),
-                self._product_name(row.product_id, row.product_text),
-                self._directory_name(row.location_id, row.location_text, self.locations),
-                format_hours(row.hours),
-                {
-                    "strict": "MAX",
-                    "segmented": "MAX, пункт",
-                    "historical": "История",
-                    "historical_segmented": "История, пункт",
-                    "employee_segmented": "MAX, сотрудники",
-                    "product_segmented": "MAX, изделие",
-                    "unparsed": "Ошибка",
-                }.get(
-                    row.source_kind, row.source_kind
-                ),
-                row.revision,
-            ]
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
-                item.setData(ROW_ID_ROLE, row.id)
-                item.setToolTip(str(value))
-                if row.status == "imported":
-                    item.setForeground(QColor("#26834a"))
-                elif row.status in {
-                    "needs_employee",
-                    "needs_location",
-                    "needs_object",
-                    "invalid_hours",
-                    "source_error",
-                    "product_conflict",
-                    "changed_after_import",
-                }:
-                    item.setForeground(QColor("#b54532"))
-                self.table.setItem(row_index, column, item)
-            if row.id == selected_id:
-                self.table.selectRow(row_index)
-        if self.table.currentRow() < 0 and self.rows:
-            self.table.selectRow(0)
+        target_index = None
+        self.table.blockSignals(True)
+        try:
+            self.table.clearContents()
+            self.table.setRowCount(len(self.rows))
+            for row_index, row in enumerate(self.rows):
+                values = [
+                    STATUS_LABELS.get(row.status, row.status),
+                    row.work_date.strftime("%d.%m.%Y"),
+                    self._employee_name(row.employee_id, row.employee_text),
+                    self._directory_name(row.object_id, row.object_text, self.objects),
+                    self._product_name(row.product_id, row.product_text),
+                    self._directory_name(row.location_id, row.location_text, self.locations),
+                    format_hours(row.hours),
+                    {
+                        "strict": "MAX",
+                        "segmented": "MAX, пункт",
+                        "historical": "История",
+                        "historical_segmented": "История, пункт",
+                        "employee_segmented": "MAX, сотрудники",
+                        "product_segmented": "MAX, изделие",
+                        "unparsed": "Ошибка",
+                    }.get(row.source_kind, row.source_kind),
+                    row.revision,
+                ]
+                for column, value in enumerate(values):
+                    item = QTableWidgetItem(str(value))
+                    item.setData(ROW_ID_ROLE, row.id)
+                    item.setToolTip(str(value))
+                    if row.status == "imported":
+                        item.setForeground(QColor("#26834a"))
+                    elif row.status in {
+                        "needs_employee",
+                        "needs_location",
+                        "needs_object",
+                        "invalid_hours",
+                        "source_error",
+                        "product_conflict",
+                        "changed_after_import",
+                    }:
+                        item.setForeground(QColor("#b54532"))
+                    self.table.setItem(row_index, column, item)
+                if row.id == selected_id:
+                    target_index = row_index
+            if target_index is None and self.rows:
+                target_index = min(max(selected_index, 0), len(self.rows) - 1)
+            if target_index is not None:
+                self.table.selectRow(target_index)
+            else:
+                self.table.clearSelection()
+                self.table.setCurrentCell(-1, -1)
+        finally:
+            self.table.blockSignals(False)
+        self._load_selected()
 
     def _refresh_stats(self) -> None:
         source_path = Path(self.source_path.text().strip()) if self.source_path.text().strip() else None
@@ -425,6 +436,7 @@ class WorkBotInboxWidget(QWidget):
         self.import_button.setEnabled(enabled)
         self.reject_button.setEnabled(enabled)
         if row is None:
+            self._clear_editor()
             return
         self._select_combo(self.employee, row.employee_id)
         self._select_combo(self.location, row.location_id)
@@ -437,6 +449,17 @@ class WorkBotInboxWidget(QWidget):
         self.description.setPlainText(row.work_types)
         self.issue.setText(row.error_message or "Соответствия найдены автоматически")
         self.source_text.setPlainText(row.raw_text)
+
+    def _clear_editor(self) -> None:
+        for combo in (self.employee, self.location, self.object, self.work_type):
+            combo.setCurrentIndex(0)
+        self.product.setCurrentIndex(0)
+        self.product_reference.clear()
+        self.work_date.setDate(QDate.currentDate())
+        self.hours.clear()
+        self.description.clear()
+        self.issue.clear()
+        self.source_text.clear()
 
     def _import_selected(self) -> None:
         row = self._selected_row()

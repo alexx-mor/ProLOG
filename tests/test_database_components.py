@@ -3,8 +3,8 @@
 from pathlib import Path
 import sqlite3
 
-from database import Database, DirectoryRepository, WorkLogRepository
-from models import AliasItem
+from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
+from models import AliasItem, Employee
 
 
 def test_legacy_component_rows_move_without_changing_ids(tmp_path: Path) -> None:
@@ -92,6 +92,31 @@ def test_locations_and_work_types_keep_manual_order(tmp_path: Path) -> None:
         reloaded = DirectoryRepository(Database(database.path))
         persisted = [item.id for item in reloaded.list_items(table_key, active_only=False)]
         assert persisted.index(second_id) + 1 == persisted.index(first_id)
+
+
+def test_employee_hire_date_is_persisted_in_component_database(tmp_path: Path) -> None:
+    database = Database(tmp_path / "prolog.sqlite3")
+    database.initialize()
+    repository = EmployeeRepository(database)
+
+    employee_id = repository.save(
+        Employee(
+            full_name="Иванов Иван Иванович",
+            position="Слесарь",
+            category="2",
+            hire_date="2024-03-18",
+        )
+    )
+
+    employee = repository.get(employee_id)
+    assert employee is not None
+    assert employee.hire_date == "2024-03-18"
+    with database.connect() as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA employees_db.table_info(Employees)")
+        }
+    assert "hire_date" in columns
 
 
 def test_move_skips_hidden_inactive_rows(tmp_path: Path) -> None:

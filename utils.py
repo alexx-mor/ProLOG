@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 from pathlib import Path
 
 from constants import BACKUPS_DIR, DATA_DIR, DICTIONARIES_DIR, EXPORTS_DIR
@@ -39,3 +40,36 @@ def unique_path(path: Path) -> Path:
         if not candidate.exists():
             return candidate
     raise RuntimeError(f"Не удалось подобрать имя файла для {path}")
+
+
+def employment_duration_text(hire_date: str, as_of: date | None = None) -> str:
+    if not hire_date.strip():
+        return "Дата не указана"
+    try:
+        started = datetime.strptime(hire_date, "%Y-%m-%d").date()
+    except ValueError:
+        return "Некорректная дата"
+    current = as_of or date.today()
+    if started > current:
+        return "Дата позднее текущей"
+
+    months_total = (current.year - started.year) * 12 + current.month - started.month
+    if current.day < started.day:
+        months_total -= 1
+    years, months = divmod(max(0, months_total), 12)
+    parts = []
+    if years:
+        parts.append(f"{years} {_plural(years, 'год', 'года', 'лет')}")
+    if months:
+        parts.append(f"{months} {_plural(months, 'месяц', 'месяца', 'месяцев')}")
+    return " ".join(parts) or "Менее месяца"
+
+
+def _plural(value: int, one: str, few: str, many: str) -> str:
+    if value % 100 in range(11, 15):
+        return many
+    if value % 10 == 1:
+        return one
+    if value % 10 in range(2, 5):
+        return few
+    return many

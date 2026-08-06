@@ -23,7 +23,14 @@ from integrations.workbot.matcher import detect_product
 from integrations.workbot.repository import WorkBotRepository
 from integrations.workbot.service import WorkBotIntegrationService
 from models import AliasItem, Employee, ProductItem
-from services import DirectoryService, EmployeeService, WorkLogService, normalize_mobile_phone
+from services import (
+    DirectoryService,
+    EmployeeService,
+    WorkLogService,
+    normalize_hire_date,
+    normalize_mobile_phone,
+)
+from utils import employment_duration_text
 
 
 def test_fractional_hours_are_not_rounded() -> None:
@@ -31,6 +38,8 @@ def test_fractional_hours_are_not_rounded() -> None:
     assert parse_hours("10.25") == 10.25
     assert format_hours(7.5) == "7,5"
     assert normalize_mobile_phone("8 (999) 123-45-67") == "+79991234567"
+    assert normalize_hire_date("18.03.2024") == "2024-03-18"
+    assert employment_duration_text("2024-03-18", date(2026, 8, 6)) == "2 года 4 месяца"
 
 
 def test_product_is_detected_by_code() -> None:

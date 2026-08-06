@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
@@ -22,14 +22,20 @@ def import_employees(path: Path, service: EmployeeService) -> int:
     workbook = load_workbook(path, read_only=True, data_only=True)
     try:
         sheet = workbook.active
-        headers = [str(cell.value or "").strip().lower() for cell in next(sheet.iter_rows(max_row=1))]
+        headers = [
+            str(cell.value or "").strip().lower()
+            for cell in next(sheet.iter_rows(max_row=1))
+        ]
         required = {"фио": None, "должность": None, "категория": None, "разряд": None}
         phone_column = None
+        hire_date_column = None
         for index, header in enumerate(headers):
             if header in required:
                 required[header] = index
             if header in {"телефон", "мобильный телефон", "мобильный"}:
                 phone_column = index
+            if header in {"дата трудоустройства", "дата приема", "дата приёма"}:
+                hire_date_column = index
         if required["фио"] is None:
             raise ValueError("В Excel-файле не найдена колонка 'ФИО'")
 
@@ -41,8 +47,12 @@ def import_employees(path: Path, service: EmployeeService) -> int:
             service.import_employee(
                 full_name=full_name,
                 position=_value(row, required["должность"]),
-                category=_value(row, required["категория"]) or _value(row, required["разряд"]),
+                category=(
+                    _value(row, required["категория"])
+                    or _value(row, required["разряд"])
+                ),
                 mobile_phone=_value(row, phone_column),
+                hire_date=_employee_date_value(row, hire_date_column),
             )
             imported += 1
         return imported
@@ -54,7 +64,10 @@ def export_employees(path: Path, employees: list[Employee]) -> Path:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Сотрудники"
-    _write_header(sheet, ["№", "ФИО", "Должность", "Разряд", "Мобильный телефон"])
+    _write_header(
+        sheet,
+        ["№", "ФИО", "Должность", "Разряд", "Мобильный телефон", "Дата трудоустройства"],
+    )
     for row_index, employee in enumerate(employees, start=2):
         sheet.append(
             [
@@ -63,6 +76,7 @@ def export_employees(path: Path, employees: list[Employee]) -> Path:
                 employee.position,
                 employee.category,
                 employee.mobile_phone,
+                _display_employee_date(employee.hire_date),
             ]
         )
     _autosize(sheet)
@@ -122,6 +136,30 @@ def _value(row: tuple[object, ...], index: int | None) -> str:
         return ""
     value = row[index]
     return "" if value is None else str(value).strip()
+
+
+def _employee_date_value(row: tuple[object, ...], index: int | None) -> str:
+    if index is None or index >= len(row):
+        return ""
+    value = row[index]
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    raw = "" if value is None else str(value).strip()
+    for date_format in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(raw, date_format).date().isoformat()
+        except ValueError:
+            continue
+    return raw
+
+
+def _display_employee_date(value: str) -> str:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except ValueError:
+        return ""
 
 
 def _write_header(sheet, headers: list[str], row: int = 1) -> None:

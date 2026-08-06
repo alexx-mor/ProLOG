@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 import re
 
 from analytics import AnalyticsResult, build_analytics
@@ -209,13 +209,23 @@ class EmployeeService:
         employee.position = _uppercase_first(employee.position)
         employee.category = _normalize_employee_category(employee.category)
         employee.mobile_phone = normalize_mobile_phone(employee.mobile_phone)
+        employee.hire_date = normalize_hire_date(employee.hire_date)
         known_category_rule = self.directories.category_for_position(employee.position)
         position_id = self.directories.ensure("positions", employee.position)
         json_position_categories = load_position_category_map()
         is_custom_position = employee.position not in json_position_categories
-        if position_id and employee.position and not employee.category and (not known_category_rule or is_custom_position):
+        if (
+            position_id
+            and employee.position
+            and not employee.category
+            and (not known_category_rule or is_custom_position)
+        ):
             self.directories.set_position_category(position_id, "—")
-        has_categories = bool(category_values_from_rule(self.directories.category_for_position(employee.position)))
+        has_categories = bool(
+            category_values_from_rule(
+                self.directories.category_for_position(employee.position)
+            )
+        )
         has_student_category = self.directories.student_allowed_for_position(employee.position)
         if not has_categories and not has_student_category:
             employee.category = ""
@@ -223,13 +233,21 @@ class EmployeeService:
             self._validate_category(employee)
         return self.employees.save(employee)
 
-    def import_employee(self, full_name: str, position: str, category: str, mobile_phone: str = "") -> int:
+    def import_employee(
+        self,
+        full_name: str,
+        position: str,
+        category: str,
+        mobile_phone: str = "",
+        hire_date: str = "",
+    ) -> int:
         return self.save(
             Employee(
                 full_name=full_name,
                 position=position,
                 category=category,
                 mobile_phone=mobile_phone,
+                hire_date=hire_date,
             ),
             validate_category=False,
         )
@@ -283,6 +301,24 @@ def normalize_mobile_phone(value: str) -> str:
     if not 11 <= len(digits) <= 15:
         raise ValueError("Укажите мобильный телефон в международном формате, например +7 999 123-45-67")
     return "+" + digits
+
+
+def normalize_hire_date(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return ""
+    parsed = None
+    for date_format in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
+        try:
+            parsed = datetime.strptime(raw, date_format).date()
+            break
+        except ValueError:
+            continue
+    if parsed is None:
+        raise ValueError("Укажите дату трудоустройства в формате ДД.ММ.ГГГГ")
+    if parsed > date.today():
+        raise ValueError("Дата трудоустройства не может быть позднее сегодняшней даты")
+    return parsed.isoformat()
 
 
 def _normalize_employee_category(value: str) -> str:

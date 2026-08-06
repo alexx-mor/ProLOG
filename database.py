@@ -297,6 +297,10 @@ class Database:
             connection.execute(
                 "ALTER TABLE employees_db.Employees ADD COLUMN mobile_phone TEXT NOT NULL DEFAULT ''"
             )
+        if "hire_date" not in employee_columns:
+            connection.execute(
+                "ALTER TABLE employees_db.Employees ADD COLUMN hire_date TEXT NOT NULL DEFAULT ''"
+            )
         position_columns = {row["name"] for row in connection.execute("PRAGMA table_info(Positions)")}
         if "category" not in position_columns:
             connection.execute("ALTER TABLE Positions ADD COLUMN category TEXT NOT NULL DEFAULT '1-3'")
@@ -1387,7 +1391,8 @@ class EmployeeRepository:
                 connection.execute(
                     f"""
                     UPDATE {EMPLOYEES_TABLE}
-                    SET full_name = ?, position = ?, category = ?, status = ?, mobile_phone = ?
+                    SET full_name = ?, position = ?, category = ?, status = ?, mobile_phone = ?,
+                        hire_date = ?
                     WHERE id = ?
                     """,
                     (
@@ -1396,14 +1401,17 @@ class EmployeeRepository:
                         employee.category.strip(),
                         employee.status,
                         employee.mobile_phone.strip(),
+                        employee.hire_date.strip(),
                         employee.id,
                     ),
                 )
                 return employee.id
             cursor = connection.execute(
                 f"""
-                INSERT INTO {EMPLOYEES_TABLE} (full_name, position, category, status, mobile_phone)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO {EMPLOYEES_TABLE} (
+                    full_name, position, category, status, mobile_phone, hire_date
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(full_name) DO UPDATE SET
                     position = excluded.position,
                     category = excluded.category,
@@ -1411,6 +1419,10 @@ class EmployeeRepository:
                     mobile_phone = CASE
                         WHEN excluded.mobile_phone <> '' THEN excluded.mobile_phone
                         ELSE mobile_phone
+                    END,
+                    hire_date = CASE
+                        WHEN excluded.hire_date <> '' THEN excluded.hire_date
+                        ELSE hire_date
                     END
                 """,
                 (
@@ -1419,6 +1431,7 @@ class EmployeeRepository:
                     employee.category.strip(),
                     employee.status,
                     employee.mobile_phone.strip(),
+                    employee.hire_date.strip(),
                 ),
             )
             row = connection.execute(
@@ -1458,6 +1471,7 @@ class EmployeeRepository:
             category=row["category"] or "",
             status=row["status"],
             mobile_phone=row["mobile_phone"] or "",
+            hire_date=row["hire_date"] or "",
         )
 
 
@@ -1781,7 +1795,8 @@ CREATE TABLE IF NOT EXISTS employees_db.Employees (
     position TEXT NOT NULL DEFAULT '',
     category TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'Активен',
-    mobile_phone TEXT NOT NULL DEFAULT ''
+    mobile_phone TEXT NOT NULL DEFAULT '',
+    hire_date TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS objects_db.Objects (

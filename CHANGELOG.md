@@ -1,5 +1,29 @@
 ﻿# Changelog
 
+## 2026-08-06 - Employee tenure and compact WorkBot editor
+
+### Added
+
+- Employee cards now store an optional hire date and show the calculated time
+  spent in the organization.
+- Employee Excel import and export support the `Дата трудоустройства` column.
+- Existing employee databases are upgraded automatically without requiring
+  dates for current records.
+
+### Fixed
+
+- The incoming-report editor fits a Full HD workspace without a vertical scroll
+  bar; the review status, description and source message use space more compactly.
+- After an imported row disappears from a filtered inbox, the next row is loaded
+  into the editor. The editor is cleared when no rows remain.
+- Bumped the application and Windows executable version to `0.5.7`.
+
+### Verified
+
+- All project tests pass: `52 passed`.
+- Regression checks cover database migration, tenure calculation, Excel round
+  trips, Full HD layout and selection after import.
+
 ## 2026-08-05 - Selective WorkBot alias learning
 
 ### Changed

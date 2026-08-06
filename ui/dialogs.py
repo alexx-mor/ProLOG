@@ -60,6 +60,7 @@ from category_rules import NO_CATEGORY, STUDENT_CATEGORY
 from models import AliasItem, DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
 from services import category_values_from_rule
 from update_checker import UpdateChecker
+from utils import employment_duration_text
 
 
 PAY_CATEGORY_COLUMNS = (STUDENT_CATEGORY, "1", "2", "3")
@@ -212,6 +213,21 @@ class EmployeeDialog(QDialog):
         self.full_name = QLineEdit(employee.full_name if employee else "")
         self.mobile_phone = QLineEdit(employee.mobile_phone if employee else "")
         self.mobile_phone.setPlaceholderText("+7 999 123-45-67")
+        self.hire_date = QDateEdit()
+        self.hire_date.setCalendarPopup(True)
+        self.hire_date.setDisplayFormat("dd.MM.yyyy")
+        self.hire_date.setMinimumDate(QDate(1950, 1, 1))
+        self.hire_date.setMaximumDate(QDate.currentDate())
+        stored_hire_date = (
+            QDate.fromString(employee.hire_date, "yyyy-MM-dd") if employee else QDate()
+        )
+        self.hire_date.setDate(
+            stored_hire_date if stored_hire_date.isValid() else QDate.currentDate()
+        )
+        self.hire_date_enabled = QCheckBox("Указать")
+        self.hire_date_enabled.setChecked(stored_hire_date.isValid())
+        self.employment_duration = QLabel()
+        self.employment_duration.setObjectName("WizardSubtitle")
         self.position = QComboBox()
         self.position.setEditable(True)
         self.position.setView(QListView())
@@ -239,11 +255,21 @@ class EmployeeDialog(QDialog):
         layout = QFormLayout(self)
         layout.addRow("ФИО", self.full_name)
         layout.addRow("Мобильный телефон", self.mobile_phone)
+        hire_date_row = QHBoxLayout()
+        hire_date_row.addWidget(self.hire_date, 1)
+        hire_date_row.addWidget(self.hire_date_enabled)
+        layout.addRow("Дата трудоустройства", hire_date_row)
+        layout.addRow("Стаж в организации", self.employment_duration)
         layout.addRow("Должность", self.position)
         layout.addRow("Разряд", self.category)
         layout.addRow(buttons)
         self.position.currentTextChanged.connect(lambda _text: self._position_changed(layout))
+        self.hire_date_enabled.toggled.connect(self._toggle_hire_date)
+        self.hire_date.dateChanged.connect(
+            lambda _date: self._refresh_employment_duration()
+        )
         self._position_changed(layout)
+        self._toggle_hire_date(self.hire_date_enabled.isChecked())
 
     def employee(self, employee_id: int | None = None) -> Employee:
         return Employee(
@@ -252,7 +278,24 @@ class EmployeeDialog(QDialog):
             position=self.position.currentText(),
             category=self.category.currentText(),
             mobile_phone=self.mobile_phone.text(),
+            hire_date=(
+                self.hire_date.date().toString("yyyy-MM-dd")
+                if self.hire_date_enabled.isChecked()
+                else ""
+            ),
         )
+
+    def _toggle_hire_date(self, enabled: bool) -> None:
+        self.hire_date.setEnabled(enabled)
+        self._refresh_employment_duration()
+
+    def _refresh_employment_duration(self) -> None:
+        value = (
+            self.hire_date.date().toString("yyyy-MM-dd")
+            if self.hire_date_enabled.isChecked()
+            else ""
+        )
+        self.employment_duration.setText(employment_duration_text(value))
 
     def _sync_categories(self, current: str = "") -> None:
         position = self.position_items.get(self.position.currentText().strip())
