@@ -92,7 +92,11 @@ def _normalize(value: str) -> str:
 
 
 def _contains_identifier(text: str, identifier: str) -> bool:
-    tokens = re.findall(r"[0-9a-zа-я]+", _normalize(identifier))
+    tokens = [
+        part
+        for token in re.findall(r"[0-9a-zа-я]+", _normalize(identifier))
+        for part in re.findall(r"[a-zа-я]+|\d+", token)
+    ]
     if not tokens:
         return False
     body = r"[^0-9a-zа-я]*".join(re.escape(token) for token in tokens)

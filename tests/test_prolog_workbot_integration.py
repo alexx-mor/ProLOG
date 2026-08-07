@@ -60,6 +60,12 @@ def test_product_is_detected_by_code() -> None:
         [ProductItem(id=13, object_id=4, name="Шкаф 3", code="ШУ3")],
     )
     assert lower_case.product_id == 13
+    spaced_code = detect_product(
+        "сборка и маркировка ШУ 3",
+        [ProductItem(id=16, object_id=4, name="ШУ3")],
+        allow_short_names=True,
+    )
+    assert spaced_code.product_id == 16
     serial_priority = detect_product(
         "Шкаф управления 2323",
         [
@@ -183,6 +189,108 @@ def test_numbered_message_is_split_by_object_and_hours(tmp_path: Path) -> None:
     assert [row.work_type_id for row in rows] == [assembly_id, connection_id]
     assert "Жигалово" in rows[0].source_fragment
     assert "УНР" in rows[1].source_fragment
+
+
+def test_historical_days_split_unnumbered_work_lines_and_use_sender_binding(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "workbot.sqlite3"
+    _create_workbot_source(source_path)
+    day_fragments = (
+        (
+            "2026-08-03",
+            "03.08.26\nНикитин Д. С.\nГазетная. 8-17:\n"
+            "Нарезка крышек для ЖИГАЛОВО ШУ 2 3076 - 8-10 (2ЧАСА)\n"
+            "Сборка ЖИГАЛОВО ШУ 5 3079 - 10-17 (6 ЧАСОВ)",
+        ),
+        (
+            "2026-08-05",
+            "05.08.26\nГазетная. 8-17:\n"
+            "Нарезка крышек на ЖИГАЛОВО ШУ 5 3079 - 8-10 (2 часа)\n"
+            "Монтаж лампочек на УНР ШУФ 9 - 10-12 (2 ЧАСА)\n"
+            "Сборка ЖИГАЛОВО ШУ 3 (мкэш) - 13-17 (4 часа)",
+        ),
+        (
+            "2026-08-06",
+            "06.08.26\nГазетная. 8-17\n"
+            "Сборка ЖИГАЛОВО ШУ 3 - 8-11 (3 часа)\n"
+            "Уборка на крыше - 11-12 (1 час)\n"
+            "Упаковка УНР ШУФ 9 - 13-14 (2 ЧАСА)\n"
+            "СЬОРКА ЖИГАЛОВО ШОС 3082 14-17 (3 ЧАСА)",
+        ),
+    )
+    message = "\n\n".join(fragment for _work_date, fragment in day_fragments)
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("DELETE FROM reports")
+        connection.execute(
+            "UPDATE users SET first_name = 'Денис', last_name = '', "
+            "username = 'nickitin', employee_name = 'nickitin' WHERE max_user_id = 100"
+        )
+        connection.execute(
+            "UPDATE messages SET raw_text = ?, parse_status = 'parsed_legacy' "
+            "WHERE max_message_id = 'message-1'",
+            (message,),
+        )
+        for source_index, (work_date, fragment) in enumerate(day_fragments):
+            connection.execute(
+                """
+                INSERT INTO historical_reports (
+                    source_message_id, source_index, employee_name, work_date, work_types,
+                    hours, object_name, location, confidence, source_fragment, created_at
+                ) VALUES (
+                    'message-1', ?, 'nickitin', ?, ?, 8, '', 'Производство',
+                    1, ?, '2026-08-06'
+                )
+                """,
+                (source_index, work_date, fragment, fragment),
+            )
+
+    service, _worklogs, _employee_id, _location_id, jig_id, *_rest = _create_prolog(
+        tmp_path
+    )
+    employee_id = service.employees.save(Employee("Никитин Денис Сергеевич", "Слесарь", "2"))
+    service.repository.save_employee_binding(100, employee_id, "nickitin")
+    unr_id = service.directories.ensure("objects", "УНР")
+    for work_type in (
+        "Нарезка крышек",
+        "Сборка",
+        "Монтаж лампочек",
+        "Уборка",
+        "Упаковка",
+    ):
+        service.directories.ensure("work_types", work_type)
+    product_ids = {
+        service.directories.save_product(
+            ProductItem(object_id=jig_id, name="ШУ2", serial_number="3076")
+        ),
+        service.directories.save_product(
+            ProductItem(object_id=jig_id, name="ШУ5", serial_number="3079")
+        ),
+        service.directories.save_product(
+            ProductItem(object_id=jig_id, name="ШУ3")
+        ),
+        service.directories.save_product(
+            ProductItem(object_id=jig_id, name="ШОС", serial_number="3082", code="ШОС")
+        ),
+        service.directories.save_product(
+            ProductItem(object_id=unr_id, name="ШУФ9")
+        ),
+    }
+
+    result = service.sync(source_path)
+    rows = service.list_rows()
+
+    assert result.added_rows == 9
+    assert len(rows) == 9
+    assert {row.source_kind for row in rows} == {"historical_segmented"}
+    assert {row.employee_id for row in rows} == {employee_id}
+    assert sum(row.object_id == jig_id for row in rows) == 6
+    assert sum(row.object_id == unr_id for row in rows) == 2
+    assert sum(row.object_id is None for row in rows) == 1
+    assert {row.product_id for row in rows if row.product_id is not None} == product_ids
+    assert sorted(row.hours for row in rows) == [1, 2, 2, 2, 2, 3, 3, 4, 6]
+    assert all(row.raw_text == message for row in rows)
+    assert all("8-10" not in row.work_types for row in rows)
 
 
 def test_historical_message_is_split_for_each_explicit_employee(tmp_path: Path) -> None:

@@ -32,7 +32,7 @@ class WorkBotSource:
         candidates = [
             expanded
             for row in rows
-            for expanded in _expand_numbered_items(self._map(row))
+            for expanded in _expand_work_items(self._map(row))
         ]
         assign_candidate_identity(candidates)
         return candidates
@@ -113,28 +113,36 @@ class WorkBotSource:
             location_text=str(row["location"] or "").strip(),
             confidence=float(row["confidence"] or 0),
             source_fragment=str(row["source_fragment"] or row["raw_text"] or "").strip(),
+            sender_profile_names=_sender_profile_names(row),
             error_message=str(row["source_error"] or "").strip(),
         )
 
 _NUMBERED_ITEM_RE = re.compile(r"^\s*\d{1,2}\s*[.)]\s*(?P<body>.+?)\s*$")
+_DATE_LINE_RE = re.compile(r"^\s*\d{1,2}[./]\d{1,2}[./]\d{2,4}\s*$")
 _ITEM_HOURS_RE = re.compile(
     r"\s*[([]?\s*(?P<hours>\d{1,2}(?:[.,]\d+)?)\s*"
     r"(?:ч(?:ас(?:а|ов)?)?\.?|час(?:а|ов)?)\s*[)\]]?\s*$",
     re.IGNORECASE,
 )
+_TIME_RANGE_SUFFIX_RE = re.compile(
+    r"\s*[-–—]?\s*\d{1,2}(?::\d{2})?\s*[-–—]\s*\d{1,2}(?::\d{2})?\s*$"
+)
 
 
-def _expand_numbered_items(candidate: WorkBotCandidate) -> list[WorkBotCandidate]:
+def _expand_work_items(candidate: WorkBotCandidate) -> list[WorkBotCandidate]:
     items: list[tuple[str, float | None, str]] = []
     source_text = candidate.source_fragment or candidate.raw_text
     for line in source_text.replace("\r", "").splitlines():
-        item_match = _NUMBERED_ITEM_RE.match(line)
-        if item_match is None:
+        if _DATE_LINE_RE.match(line):
             continue
-        body = item_match.group("body").strip()
+        item_match = _NUMBERED_ITEM_RE.match(line)
+        body = item_match.group("body").strip() if item_match else line.strip()
         hours_match = _ITEM_HOURS_RE.search(body)
+        if item_match is None and hours_match is None:
+            continue
         hours = normalize_hours(hours_match.group("hours")) if hours_match else None
         description = _ITEM_HOURS_RE.sub("", body).strip(" .,:;-")
+        description = _TIME_RANGE_SUFFIX_RE.sub("", description).strip(" .,:;-")
         if description:
             items.append((description, hours, body))
     if len(items) < 2:
@@ -154,7 +162,7 @@ def _expand_numbered_items(candidate: WorkBotCandidate) -> list[WorkBotCandidate
             source_index=candidate.source_index,
             source_kind=(
                 "historical_segmented"
-                if candidate.source_kind == "historical"
+                if candidate.source_kind.startswith("historical")
                 else "segmented"
             ),
             work_types=description,
@@ -172,6 +180,22 @@ def _expand_numbered_items(candidate: WorkBotCandidate) -> list[WorkBotCandidate
         )
         for index, (description, hours, body) in enumerate(items)
     ]
+
+
+def _sender_profile_names(row: sqlite3.Row) -> tuple[str, ...]:
+    first_name = str(row["sender_first_name"] or "").strip()
+    last_name = str(row["sender_last_name"] or "").strip()
+    username = str(row["sender_username"] or "").strip().lstrip("@")
+    employee_name = str(row["sender_employee_name"] or "").strip()
+    values = (
+        first_name,
+        last_name,
+        " ".join(value for value in (first_name, last_name) if value),
+        " ".join(value for value in (last_name, first_name) if value),
+        username,
+        employee_name,
+    )
+    return tuple(dict.fromkeys(value for value in values if value))
 
 
 def assign_candidate_identity(candidates: list[WorkBotCandidate]) -> None:
@@ -215,6 +239,10 @@ SELECT
     m.chat_id,
     m.received_at,
     m.raw_text,
+    u.first_name AS sender_first_name,
+    u.last_name AS sender_last_name,
+    u.username AS sender_username,
+    u.employee_name AS sender_employee_name,
     r.employee_name,
     r.work_date,
     r.work_types,
@@ -226,6 +254,7 @@ SELECT
     '' AS source_error
 FROM reports r
 JOIN messages m ON m.max_message_id = r.source_message_id
+LEFT JOIN users u ON u.max_user_id = m.sender_id
 UNION ALL
 SELECT
     m.max_message_id,
@@ -235,6 +264,10 @@ SELECT
     m.chat_id,
     m.received_at,
     m.raw_text,
+    u.first_name AS sender_first_name,
+    u.last_name AS sender_last_name,
+    u.username AS sender_username,
+    u.employee_name AS sender_employee_name,
     h.employee_name,
     h.work_date,
     h.work_types,
@@ -246,6 +279,7 @@ SELECT
     '' AS source_error
 FROM historical_reports h
 JOIN messages m ON m.max_message_id = h.source_message_id
+LEFT JOIN users u ON u.max_user_id = m.sender_id
 UNION ALL
 SELECT
     m.max_message_id,
@@ -255,6 +289,10 @@ SELECT
     m.chat_id,
     m.received_at,
     m.raw_text,
+    u.first_name AS sender_first_name,
+    u.last_name AS sender_last_name,
+    u.username AS sender_username,
+    u.employee_name AS sender_employee_name,
     COALESCE(NULLIF(u.employee_name, ''), TRIM(u.last_name || ' ' || u.first_name)) AS employee_name,
     SUBSTR(m.received_at, 1, 10) AS work_date,
     '' AS work_types,

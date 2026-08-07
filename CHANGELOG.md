@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 2026-08-07 - WorkBot line segmentation and MAX bindings
+
+### Fixed
+
+- Historical day blocks are split into separate work rows even when operations
+  are not numbered, provided each line contains its own hours.
+- Calendar date lines are excluded from work-item detection.
+- Saved MAX bindings are now applied when WorkBot supplies the sender's profile
+  name or nickname; an explicitly recognized employee still has priority.
+- Product identifiers with optional spaces are treated equally, for example
+  `ШУ3` and `ШУ 3`, or `ШУФ9` and `ШУФ 9`.
+- Original MAX messages remain unchanged in every generated row.
+- Bumped the application and Windows executable version to `0.5.8`.
+
+### Verified
+
+- All project tests pass: `53 passed`.
+- The reported message was checked against copies of the working databases: it
+  produces 9 rows with the correct employee, objects, products and hours.
+
 ## 2026-08-06 - Employee tenure and compact WorkBot editor
 
 ### Added

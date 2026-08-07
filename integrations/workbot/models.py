@@ -53,6 +53,7 @@ class WorkBotCandidate:
     confidence: float
     source_fragment: str
     product_text: str = ""
+    sender_profile_names: tuple[str, ...] = ()
     content_hash: str = ""
     employee_id: int | None = None
     object_id: int | None = None

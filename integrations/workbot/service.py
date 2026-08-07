@@ -328,9 +328,16 @@ class WorkBotIntegrationService:
         explicit = alias if alias is not None else _employee_text_id(candidate.employee_text, employees)
         if explicit is not None:
             return explicit
-        if candidate.source_kind.startswith("historical") and candidate.employee_text.strip():
-            return None
-        return bindings.get(candidate.sender_id)
+        binding = bindings.get(candidate.sender_id)
+        if binding is None or not candidate.source_kind.startswith("historical"):
+            return binding
+        employee_key = normalize_alias(candidate.employee_text)
+        profile_keys = {
+            normalize_alias(value)
+            for value in candidate.sender_profile_names
+            if normalize_alias(value)
+        }
+        return binding if not employee_key or employee_key in profile_keys else None
 
     def _expand_product_candidates(
         self,
