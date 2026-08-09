@@ -1,5 +1,43 @@
 ﻿# Changelog
 
+## 2026-08-09 - Versioned schema baseline and architecture stabilization
+
+### Added
+
+- Added transactional, sequential and idempotent `SchemaMigrations` support.
+- Registered schema version `1` as the ProLOG 0.5.8 baseline in the core,
+  employees, objects, products and aliases databases.
+- Registered an independent WorkBot schema version `1` baseline.
+- Added schema-version diagnostics and startup logging for every component.
+- Added startup protection against databases created by an unknown newer schema.
+- Added a cross-database reference check for work logs, products, MAX bindings,
+  WorkBot inbox rows and confirmed aliases.
+- Added ADR-001 through ADR-006 covering the event-centric model, attachment
+  storage, SQLite deployment, corrections, human review and future global UUIDs.
+- Added `PRODUCTION_IMPLEMENTATION_PLAN.md` with isolated future production
+  steps; no production entities or UI were implemented.
+
+### Architecture
+
+- Preserved numeric SQLite IDs and deferred additive UUID migration until the
+  future API has an actual consumer; no existing user row receives new data.
+- Explicitly separated Employee, the production participant, from User/Actor,
+  the subject performing an information-system action.
+- Confirmed that future production tables will remain in `prolog.sqlite3`, while
+  photographs will be stored outside SQLite.
+
+### Verified
+
+- All project tests pass: `60 passed`.
+- Added regression tests for migration baseline creation, repeat startup,
+  transactional rollback, an unversioned 0.5.8 database, unknown newer schema,
+  WorkBot baseline and broken cross-database references.
+- A dry run on copies of the active ProLOG and WorkBot databases registered all
+  six baselines without changing any existing user-table row.
+- The copied working databases pass cross-database reference diagnostics.
+- Application and product version remain `0.5.8`; current UI and WorkBot
+  behavior are unchanged.
+
 ## 2026-08-07 - WorkBot line segmentation and MAX bindings
 
 ### Fixed

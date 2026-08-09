@@ -19,10 +19,16 @@ from category_rules import (
 )
 from constants import (
     ALIASES_DATABASE_FILE,
+    APP_VERSION,
     DATABASE_FILE,
     EMPLOYEES_DATABASE_FILE,
     OBJECTS_DATABASE_FILE,
     PRODUCTS_DATABASE_FILE,
+)
+from database_integrity import (
+    CrossDatabaseIntegrityError,
+    DatabaseIntegrityReport,
+    check_cross_database_references,
 )
 from directory_files import (
     department_names_match,
@@ -43,6 +49,13 @@ from models import (
     WorkCalendarDay,
     WorkDayType,
     WorkLogEntry,
+)
+from schema_migrations import (
+    Migration,
+    MigrationComponent,
+    MigrationRunner,
+    SchemaVersionInfo,
+    execute_sql_script,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,6 +80,16 @@ ALIAS_DEFINITIONS = {
     "work_type": ("WorkTypeAliases", "work_type_id", "WorkTypes", "name"),
     "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
 }
+
+PROLOG_SCHEMA_VERSION = 1
+PROLOG_SCHEMA_COMPONENTS = (
+    MigrationComponent("prolog", "main"),
+    MigrationComponent("employees", "employees_db"),
+    MigrationComponent("objects", "objects_db"),
+    MigrationComponent("products", "products_db"),
+    MigrationComponent("aliases", "aliases_db"),
+)
+
 
 class Database:
     def __init__(
@@ -119,14 +142,51 @@ class Database:
 
     def initialize(self) -> None:
         with self.connect(foreign_keys=False) as connection:
-            connection.executescript(COMPONENT_SCHEMA_SQL)
-            self._migrate_legacy_components(connection)
-            connection.executescript(MAIN_SCHEMA_SQL)
-            self._migrate(connection)
-            self._remove_external_foreign_keys(connection)
-            connection.executescript(MAIN_SCHEMA_SQL)
+            versions = self._migration_runner().migrate(connection)
             self._seed(connection)
-            self._drop_legacy_component_tables(connection)
+            report = check_cross_database_references(connection)
+            if not report.is_valid:
+                raise CrossDatabaseIntegrityError(report)
+            for info in versions:
+                logger.info(
+                    "Schema component %s: version %s (supported %s)",
+                    info.component,
+                    info.current_version,
+                    info.supported_version,
+                )
+            logger.info("Cross-database reference check passed")
+
+    def schema_versions(self) -> list[SchemaVersionInfo]:
+        with self.connect() as connection:
+            return self._migration_runner().inspect(connection)
+
+    def check_references(self) -> DatabaseIntegrityReport:
+        with self.connect() as connection:
+            return check_cross_database_references(connection)
+
+    def _migration_runner(self) -> MigrationRunner:
+        return MigrationRunner(
+            PROLOG_SCHEMA_COMPONENTS,
+            (
+                Migration(
+                    version=PROLOG_SCHEMA_VERSION,
+                    name="ProLOG 0.5.8 baseline",
+                    fingerprint="prolog-component-schema-baseline-0.5.8-v1",
+                    apply=self._apply_baseline_migration,
+                ),
+            ),
+            app_version=APP_VERSION,
+        )
+
+    def _apply_baseline_migration(self, connection: sqlite3.Connection) -> None:
+        execute_sql_script(connection, COMPONENT_SCHEMA_SQL)
+        self._migrate_legacy_components(connection)
+        execute_sql_script(connection, MAIN_SCHEMA_SQL)
+        self._migrate(connection)
+        self._remove_external_foreign_keys(connection)
+        execute_sql_script(connection, MAIN_SCHEMA_SQL)
+        self._seed(connection)
+        self._drop_legacy_component_tables(connection)
 
     def database_paths(self) -> dict[str, Path]:
         return {

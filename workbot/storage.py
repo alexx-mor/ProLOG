@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
 from typing import Iterator
 
+from constants import APP_VERSION
+from schema_migrations import (
+    Migration,
+    MigrationComponent,
+    MigrationRunner,
+    SchemaVersionInfo,
+    execute_sql_script,
+)
 from workbot.models import ParsedEmployeeReport, ParsedReport, StoredReport
+
+
+WORKBOT_SCHEMA_VERSION = 1
+WORKBOT_SCHEMA_COMPONENT = MigrationComponent("workbot", "main")
+logger = logging.getLogger(__name__)
 
 
 class WorkBotStorage:
@@ -33,8 +47,36 @@ class WorkBotStorage:
 
     def initialize(self) -> None:
         with self.connect() as connection:
-            connection.executescript(_SCHEMA)
-            self._migrate_users(connection)
+            versions = self._migration_runner().migrate(connection)
+            for info in versions:
+                logger.info(
+                    "Schema component %s: version %s (supported %s)",
+                    info.component,
+                    info.current_version,
+                    info.supported_version,
+                )
+
+    def schema_versions(self) -> list[SchemaVersionInfo]:
+        with self.connect() as connection:
+            return self._migration_runner().inspect(connection)
+
+    def _migration_runner(self) -> MigrationRunner:
+        return MigrationRunner(
+            (WORKBOT_SCHEMA_COMPONENT,),
+            (
+                Migration(
+                    version=WORKBOT_SCHEMA_VERSION,
+                    name="WorkBot 0.5.8 baseline",
+                    fingerprint="workbot-schema-baseline-0.5.8-v1",
+                    apply=self._apply_baseline_migration,
+                ),
+            ),
+            app_version=APP_VERSION,
+        )
+
+    def _apply_baseline_migration(self, connection: sqlite3.Connection) -> None:
+        execute_sql_script(connection, _SCHEMA)
+        self._migrate_users(connection)
 
     @staticmethod
     def _migrate_users(connection: sqlite3.Connection) -> None:

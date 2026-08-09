@@ -6,6 +6,12 @@ The central entity is `WorkLogEntry`. Reports and shift assignments are derived
 from work log entries, so the codebase can later grow into a broader production
 platform without rewriting the foundation.
 
+## Architecture
+
+- [Architecture proposal](ARCHITECTURE_PROPOSAL.md)
+- [Production implementation plan](PRODUCTION_IMPLEMENTATION_PLAN.md)
+- [ADR-001 through ADR-006](docs/adr/README.md)
+
 ## Stack
 
 - Python 3.12
