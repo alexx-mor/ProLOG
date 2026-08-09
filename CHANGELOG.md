@@ -1,5 +1,40 @@
 ﻿# Changelog
 
+## 2026-08-09 - Production domain contracts (P1)
+
+### Added
+
+- Added the infrastructure-independent `production` package with typed domain
+  contracts for stages, production events, actors, attachment metadata and
+  future inbox bundles.
+- Added explicit lifecycle, event, source and actor enums without coupling
+  `ProductionStage` to the existing `WorkType` directory.
+- Added simple typed command contracts for creating, confirming, rejecting and
+  correcting production events, plus event and product-timeline queries.
+- Added domain errors for readiness, UTC timestamps, missing products,
+  corrections and invalid lifecycle states.
+- Added UUID v4 identities for new production entities while preserving all
+  existing numeric legacy identifiers.
+
+### Architecture
+
+- Production timestamps are timezone-aware UTC; Windows local time remains a
+  presentation-boundary concern.
+- `ActorRef` represents an information-system subject and has no Employee ID.
+- Production models use typed fields rather than generic JSON/EAV payloads.
+- No production tables, stages, UI, inbox parser, file storage or WorkBot
+  behavior were introduced in P1.
+- Application and schema versions remain unchanged at `0.5.8` and version `1`.
+
+### Verified
+
+- Added in-memory unit coverage for readiness boundaries, UUID generation and
+  immutability, Actor separation, UTC policy, confirmation, correction and
+  forbidden infrastructure imports.
+- All project tests pass: `79 passed` (`60` existing and `19` new production
+  contract tests).
+- SHA-256 hashes of all `11` working SQLite files are unchanged after P1.
+
 ## 2026-08-09 - Versioned schema baseline and architecture stabilization
 
 ### Added
