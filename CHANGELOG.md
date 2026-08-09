@@ -1,5 +1,48 @@
 ﻿# Changelog
 
+## 2026-08-09 - Production stages directory (P2)
+
+### Added
+
+- Added core schema migration `2` with the standalone `ProductionStages`
+  table, UUID v4 identities, stable machine codes and timezone-aware UTC audit
+  timestamps.
+- Added the approved editable seed of 10 production stages. The intentionally
+  deferred `ASSEMBLY` stage is not included.
+- Added dedicated `ProductionStageRepository` and `ProductionStageService`
+  classes without using `DirectoryRepository`, `DirectoryService` or
+  `DirectoryItem`.
+- Added a dedicated production-stage widget to the existing directories area
+  with search, inactive filtering, create, rename, activate, deactivate and
+  ordering actions.
+- Added a preflight check across all component schema versions before any
+  migration is applied.
+
+### Architecture
+
+- Only the `prolog` component advances to schema version `2`; employees,
+  objects, products, aliases and WorkBot remain at version `1`.
+- Renaming a stage cannot change its code or UID. Seed retries only insert
+  missing codes and never overwrite user-managed names, order or activity.
+- ProductionStage remains independent from WorkType. No mapping, copying or
+  synchronization between the two directories was added.
+- The application and Windows executable version are updated to `0.5.9`
+  because schema v2 is deployed to the working environment.
+
+### Verified
+
+- All project tests pass: `94 passed`.
+- Migration tests cover v1 to v2, retry, rollback, component isolation, seed
+  idempotency, user rename preservation, UUID/code rules, ordering and status.
+- A dry-run on a copy of the active component set changed only
+  `prolog.sqlite3`; all legacy rows remained equal at the SQL row level and all
+  integrity/reference diagnostics passed.
+- Before deployment, active databases were backed up to
+  `backups/pre-p2-20260809-165746`.
+- After working migration, legacy core rows match the backup row-for-row; the
+  employees, objects, products, aliases and WorkBot files match it by SHA-256.
+- The packaged ProLOG 0.5.9 executable starts successfully with core schema v2.
+
 ## 2026-08-09 - Production domain contracts (P1)
 
 ### Added

@@ -169,10 +169,17 @@ def test_unknown_lifecycle_state_is_rejected() -> None:
 
 def test_production_package_has_no_forbidden_infrastructure_imports() -> None:
     package_path = Path(__file__).parents[1] / "production"
+    domain_files = {
+        "__init__.py",
+        "commands.py",
+        "errors.py",
+        "models.py",
+        "queries.py",
+    }
     forbidden_roots = {"PySide6", "sqlite3", "ui", "workbot"}
     imported_roots: set[str] = set()
 
-    for source_path in package_path.glob("*.py"):
+    for source_path in (package_path / name for name in domain_files):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

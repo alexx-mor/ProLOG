@@ -50,11 +50,13 @@ from models import (
     WorkDayType,
     WorkLogEntry,
 )
+from production.migrations import apply_production_stages_migration
 from schema_migrations import (
     Migration,
     MigrationComponent,
     MigrationRunner,
     SchemaVersionInfo,
+    UnsupportedSchemaVersionError,
     execute_sql_script,
 )
 
@@ -81,7 +83,7 @@ ALIAS_DEFINITIONS = {
     "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
 }
 
-PROLOG_SCHEMA_VERSION = 1
+PROLOG_SCHEMA_VERSION = 2
 PROLOG_SCHEMA_COMPONENTS = (
     MigrationComponent("prolog", "main"),
     MigrationComponent("employees", "employees_db"),
@@ -142,7 +144,11 @@ class Database:
 
     def initialize(self) -> None:
         with self.connect(foreign_keys=False) as connection:
-            versions = self._migration_runner().migrate(connection)
+            runners = self._migration_runners()
+            self._reject_unknown_component_versions(connection, runners)
+            versions = []
+            for runner in runners:
+                versions.extend(runner.migrate(connection))
             self._seed(connection)
             report = check_cross_database_references(connection)
             if not report.is_valid:
@@ -158,25 +164,69 @@ class Database:
 
     def schema_versions(self) -> list[SchemaVersionInfo]:
         with self.connect() as connection:
-            return self._migration_runner().inspect(connection)
+            versions = []
+            for runner in self._migration_runners():
+                versions.extend(runner.inspect(connection))
+            return versions
 
     def check_references(self) -> DatabaseIntegrityReport:
         with self.connect() as connection:
             return check_cross_database_references(connection)
 
-    def _migration_runner(self) -> MigrationRunner:
-        return MigrationRunner(
-            PROLOG_SCHEMA_COMPONENTS,
+    def _migration_runners(self) -> tuple[MigrationRunner, ...]:
+        baseline = Migration(
+            version=1,
+            name="ProLOG 0.5.8 baseline",
+            fingerprint="prolog-component-schema-baseline-0.5.8-v1",
+            apply=self._apply_baseline_migration,
+        )
+        core = MigrationRunner(
+            (PROLOG_SCHEMA_COMPONENTS[0],),
             (
+                baseline,
                 Migration(
                     version=PROLOG_SCHEMA_VERSION,
-                    name="ProLOG 0.5.8 baseline",
-                    fingerprint="prolog-component-schema-baseline-0.5.8-v1",
-                    apply=self._apply_baseline_migration,
+                    name="Production stages directory",
+                    fingerprint="prolog-production-stages-v2",
+                    apply=self._apply_production_stages_migration,
                 ),
             ),
             app_version=APP_VERSION,
         )
+        component_baselines = tuple(
+            MigrationRunner((component,), (baseline,), app_version=APP_VERSION)
+            for component in PROLOG_SCHEMA_COMPONENTS[1:]
+        )
+        return (core, *component_baselines)
+
+    @staticmethod
+    def _reject_unknown_component_versions(
+        connection: sqlite3.Connection,
+        runners: tuple[MigrationRunner, ...],
+    ) -> None:
+        newer = [
+            info
+            for runner in runners
+            for info in runner.inspect(connection)
+            if not info.is_supported
+        ]
+        if not newer:
+            return
+        details = ", ".join(
+            f"{info.component}: {info.current_version} "
+            f"(поддерживается {info.supported_version})"
+            for info in newer
+        )
+        raise UnsupportedSchemaVersionError(
+            "База данных создана более новой версией ProLOG. "
+            f"Обновите приложение. Компоненты: {details}"
+        )
+
+    def _apply_production_stages_migration(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        apply_production_stages_migration(connection)
 
     def _apply_baseline_migration(self, connection: sqlite3.Connection) -> None:
         execute_sql_script(connection, COMPONENT_SCHEMA_SQL)

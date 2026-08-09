@@ -59,6 +59,7 @@ from directory_files import dictionary_statuses, merge_dictionary_updates
 from category_rules import NO_CATEGORY, STUDENT_CATEGORY
 from models import AliasItem, DirectoryItem, Employee, ObjectStatus, PayRate, ProductItem, ProductStatus, WorkCalendarDay, WorkDayType
 from services import category_values_from_rule
+from ui.production_stage_widget import ProductionStageWidget
 from update_checker import UpdateChecker
 from utils import employment_duration_text
 
@@ -979,6 +980,7 @@ class DirectoryDialog(QDialog):
         "pay_rates": "Оплата",
         "objects": "Объекты",
         "products": "Изделия",
+        "production_stages": "Этапы производства",
         "aliases": "Алиасы",
         "calendar": "Производственный календарь",
         "databases": "Базы данных",
@@ -991,6 +993,7 @@ class DirectoryDialog(QDialog):
         "pay_rates": "Справочник оплаты",
         "objects": "Справочник объектов",
         "products": "Справочник изделий",
+        "production_stages": "Справочник этапов производства",
         "aliases": "Справочник алиасов",
         "calendar": "Производственный календарь",
         "databases": "Справочник баз данных",
@@ -1009,12 +1012,14 @@ class DirectoryDialog(QDialog):
         current_database_path: Path | None = None,
         current_database_paths: dict[str, Path] | None = None,
         employee_service=None,
+        production_stage_service=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Справочники")
         self.resize(1320, 820)
         self.directory_service = directory_service
         self.employee_service = employee_service
+        self.production_stage_service = production_stage_service
         self.database_registry = database_registry or DatabaseRegistry()
         self.config_manager = config_manager or ConfigManager()
         self.app_settings = app_settings or self.config_manager.load()
@@ -1029,6 +1034,8 @@ class DirectoryDialog(QDialog):
             self.directory_labels.pop("pay_rates", None)
         if not can_edit_databases:
             self.directory_labels.pop("databases", None)
+        if self.production_stage_service is None:
+            self.directory_labels.pop("production_stages", None)
         self.current_key = initial_key if initial_key in self.directory_labels else next(iter(self.directory_labels))
         self._show_inactive_by_key = {
             key: self.directory_service.ui_setting(f"directory/show_inactive/{key}", "1") == "1"
@@ -1054,6 +1061,11 @@ class DirectoryDialog(QDialog):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.production_stage_widget = (
+            ProductionStageWidget(self.production_stage_service, self)
+            if self.production_stage_service is not None
+            else QWidget(self)
+        )
         self.product_filter_panel = QWidget()
         self.product_object_filter = QComboBox()
         self.product_object_filter.setView(QListView())
@@ -1116,6 +1128,12 @@ class DirectoryDialog(QDialog):
         self._configured_key = self.current_key
         self._update_button_visibility()
         needle = self.search.text().strip().casefold()
+        if self.current_key == "production_stages":
+            self.production_stage_widget.refresh(
+                needle,
+                self.show_inactive.isChecked(),
+            )
+            return
         if self.current_key == "pay_rates":
             self._items = [
                 item
@@ -1531,6 +1549,7 @@ class DirectoryDialog(QDialog):
         right.addLayout(filters)
         right.addWidget(self.product_filter_panel)
         right.addWidget(self.table)
+        right.addWidget(self.production_stage_widget)
         right.addWidget(self.calendar_panel)
         right.addLayout(buttons)
         content = QHBoxLayout(self)
@@ -2245,6 +2264,14 @@ class DirectoryDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(False)
 
     def _remember_column_widths(self) -> None:
+        if self._configured_key == "production_stages":
+            widths = self.production_stage_widget.column_widths()
+            self._column_widths_by_key[self._configured_key] = widths
+            self.directory_service.set_ui_setting(
+                f"directory/column_widths/{self._configured_key}",
+                ",".join(str(width) for width in widths),
+            )
+            return
         if not self._configured_key or self.table.columnCount() <= 0:
             return
         widths = [
@@ -2258,6 +2285,9 @@ class DirectoryDialog(QDialog):
 
     def _restore_column_widths(self) -> None:
         widths = self._column_widths_by_key.get(self.current_key, [])
+        if self.current_key == "production_stages":
+            self.production_stage_widget.apply_column_widths(widths)
+            return
         if len(widths) != self.table.columnCount():
             return
         for column, width in enumerate(widths):
@@ -2282,22 +2312,30 @@ class DirectoryDialog(QDialog):
         is_products = self.current_key == "products"
         is_databases = self.current_key == "databases"
         is_aliases = self.current_key == "aliases"
+        is_production_stages = self.current_key == "production_stages"
         self.search.setVisible(not is_calendar)
         self.show_inactive.setVisible(
             not is_pay_rates and not is_calendar and not is_databases and not is_aliases
         )
-        self.table.setVisible(not is_calendar)
+        self.table.setVisible(not is_calendar and not is_production_stages)
+        self.production_stage_widget.setVisible(is_production_stages)
         self.calendar_panel.setVisible(is_calendar)
         self.product_filter_panel.setVisible(is_products)
-        self.add_button.setVisible(not is_pay_rates and not is_calendar and not is_databases)
-        self.rename_button.setVisible(not is_calendar)
+        self.add_button.setVisible(
+            not is_pay_rates and not is_calendar and not is_databases and not is_production_stages
+        )
+        self.rename_button.setVisible(not is_calendar and not is_production_stages)
         self.disable_button.setVisible(
             not is_pay_rates and not is_calendar and not is_databases and not is_aliases
+            and not is_production_stages
         )
         self.restore_button.setVisible(
             not is_pay_rates and not is_calendar and not is_databases and not is_aliases
+            and not is_production_stages
         )
-        self.delete_button.setVisible(not is_pay_rates and not is_calendar)
+        self.delete_button.setVisible(
+            not is_pay_rates and not is_calendar and not is_production_stages
+        )
         is_ordered = self.current_key in {"locations", "work_types", "objects", "products"}
         if self.current_key == "products" and self.product_sort.currentData() != "manual":
             is_ordered = False
@@ -2392,6 +2430,7 @@ def _directory_icon(key: str) -> QIcon:
         "pay_rates": "#a46a12",
         "objects": "#3d6f9f",
         "products": "#6c7a2f",
+        "production_stages": "#477a69",
         "calendar": "#8a4b6f",
         "aliases": "#477a69",
         "databases": "#4f6475",
@@ -2447,6 +2486,11 @@ def _directory_icon(key: str) -> QIcon:
         painter.drawLine(7, 8, 12, 5)
         painter.drawLine(17, 8, 12, 5)
         painter.drawLine(12, 5, 12, 14)
+    elif key == "production_stages":
+        painter.drawLine(7, 7, 17, 7)
+        painter.drawLine(7, 12, 15, 12)
+        painter.drawLine(7, 17, 12, 17)
+        painter.drawEllipse(16, 15, 3, 3)
     elif key == "calendar":
         painter.drawRect(5, 7, 14, 11)
         painter.drawLine(5, 10, 19, 10)

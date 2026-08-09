@@ -29,6 +29,8 @@ from database_registry import DatabaseRegistry
 from legacy_import.service import LegacyExcelImportService
 from integrations.workbot.repository import WorkBotRepository
 from integrations.workbot.service import WorkBotIntegrationService
+from production.repository import ProductionStageRepository
+from production.service import ProductionStageService
 from services import AnalyticsService, DirectoryService, EmployeeService, WorkLogService
 from update_checker import UpdateChecker
 from ui.auth_dialogs import LoginDialog, UserManagementDialog
@@ -55,6 +57,7 @@ class MainWindow(QMainWindow):
         self.auth_service = auth_service
         self.auth_session = auth_session
         self.directories = DirectoryService(DirectoryRepository(database))
+        self.production_stages = ProductionStageService(ProductionStageRepository(database))
         self.employees = EmployeeService(EmployeeRepository(database), self.directories)
         self.worklogs = WorkLogService(WorkLogRepository(database), self.directories)
         self.analytics = AnalyticsService(self.worklogs, self.employees, self.directories)
@@ -427,6 +430,7 @@ class MainWindow(QMainWindow):
             current_database_path=self.database.path,
             current_database_paths=self.database.database_paths(),
             employee_service=self.employees,
+            production_stage_service=self.production_stages,
         )
         dialog.exec()
         self.workbot_inbox.set_source_path(self.config.workbot_database_path)
@@ -450,6 +454,7 @@ class MainWindow(QMainWindow):
             current_database_path=self.database.path,
             current_database_paths=self.database.database_paths(),
             employee_service=self.employees,
+            production_stage_service=self.production_stages,
         )
         dialog.exec()
         objects = self.directories.list_all("objects")

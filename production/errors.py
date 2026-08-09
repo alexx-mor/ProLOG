@@ -33,3 +33,19 @@ class InvalidLifecycleStateError(ProductionDomainError):
 
 class InvalidAttachmentMetadataError(ProductionDomainError):
     """Raised when attachment metadata violates its storage contract."""
+
+
+class InvalidProductionStageCodeError(ProductionDomainError):
+    """Raised when a production-stage machine code is invalid."""
+
+
+class InvalidProductionStageNameError(ProductionDomainError):
+    """Raised when a production-stage display name is invalid."""
+
+
+class ProductionStageCodeExistsError(ProductionDomainError):
+    """Raised when a production-stage machine code is already registered."""
+
+
+class ProductionStageNotFoundError(ProductionDomainError):
+    """Raised when a requested production stage does not exist."""
