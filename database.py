@@ -50,7 +50,7 @@ from models import (
     WorkDayType,
     WorkLogEntry,
 )
-from production.migrations import apply_production_stages_migration
+from production.migrations import apply_attachments_migration, apply_production_stages_migration
 from schema_migrations import (
     Migration,
     MigrationComponent,
@@ -83,7 +83,7 @@ ALIAS_DEFINITIONS = {
     "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
 }
 
-PROLOG_SCHEMA_VERSION = 2
+PROLOG_SCHEMA_VERSION = 3
 PROLOG_SCHEMA_COMPONENTS = (
     MigrationComponent("prolog", "main"),
     MigrationComponent("employees", "employees_db"),
@@ -185,10 +185,16 @@ class Database:
             (
                 baseline,
                 Migration(
-                    version=PROLOG_SCHEMA_VERSION,
+                    version=2,
                     name="Production stages directory",
                     fingerprint="prolog-production-stages-v2",
                     apply=self._apply_production_stages_migration,
+                ),
+                Migration(
+                    version=PROLOG_SCHEMA_VERSION,
+                    name="Attachment metadata storage",
+                    fingerprint="prolog-attachment-metadata-v3",
+                    apply=self._apply_attachments_migration,
                 ),
             ),
             app_version=APP_VERSION,
@@ -227,6 +233,12 @@ class Database:
         connection: sqlite3.Connection,
     ) -> None:
         apply_production_stages_migration(connection)
+
+    def _apply_attachments_migration(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        apply_attachments_migration(connection)
 
     def _apply_baseline_migration(self, connection: sqlite3.Connection) -> None:
         execute_sql_script(connection, COMPONENT_SCHEMA_SQL)

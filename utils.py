@@ -6,11 +6,11 @@ import logging
 from datetime import date, datetime
 from pathlib import Path
 
-from constants import BACKUPS_DIR, DATA_DIR, DICTIONARIES_DIR, EXPORTS_DIR
+from constants import ATTACHMENTS_DIR, BACKUPS_DIR, DATA_DIR, DICTIONARIES_DIR, EXPORTS_DIR
 
 
 def ensure_app_directories() -> None:
-    for directory in (DATA_DIR, EXPORTS_DIR, BACKUPS_DIR, DICTIONARIES_DIR):
+    for directory in (DATA_DIR, EXPORTS_DIR, BACKUPS_DIR, DICTIONARIES_DIR, ATTACHMENTS_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 

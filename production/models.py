@@ -217,18 +217,19 @@ class Attachment:
     mime_type: str
     size_bytes: int
     received_at_utc: datetime
+    created_at_utc: datetime = field(default_factory=utc_now)
     width: int | None = None
     height: int | None = None
     captured_at_utc: datetime | None = None
-    source_type: ProductionSourceType | None = None
+    source_type: str | None = None
     source_message_id: str | None = None
     source_attachment_id: str | None = None
     id: int | None = None
     uid: UUID = field(default_factory=uuid4)
 
     def __post_init__(self) -> None:
-        if self.source_type is not None:
-            _require_enum(self.source_type, ProductionSourceType, "source_type")
+        if self.source_type is not None and not self.source_type.strip():
+            raise InvalidAttachmentMetadataError("source_type must not be blank")
         _validate_storage_key(self.storage_key)
         if re.fullmatch(r"[0-9a-fA-F]{64}", self.sha256) is None:
             raise InvalidAttachmentMetadataError("sha256 must contain 64 hexadecimal characters")
@@ -242,6 +243,7 @@ class Attachment:
             if value is not None and value <= 0:
                 raise InvalidAttachmentMetadataError(f"{field_name} must be positive")
         require_utc_datetime(self.received_at_utc, "received_at_utc")
+        require_utc_datetime(self.created_at_utc, "created_at_utc")
         if self.captured_at_utc is not None:
             require_utc_datetime(self.captured_at_utc, "captured_at_utc")
 

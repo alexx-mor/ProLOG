@@ -49,3 +49,27 @@ class ProductionStageCodeExistsError(ProductionDomainError):
 
 class ProductionStageNotFoundError(ProductionDomainError):
     """Raised when a requested production stage does not exist."""
+
+
+class AttachmentStorageError(RuntimeError):
+    """Base error for attachment filesystem operations."""
+
+
+class AttachmentPathError(AttachmentStorageError):
+    """Raised when a storage key escapes or violates the configured root."""
+
+
+class AttachmentIntegrityError(AttachmentStorageError):
+    """Raised when physical content does not match its expected SHA-256."""
+
+
+class AttachmentRootUnavailableError(AttachmentStorageError):
+    """Raised when the configured attachment root cannot be used."""
+
+
+class AttachmentSourceExistsError(ProductionDomainError):
+    """Raised when one logical source attachment is already registered."""
+
+
+class AttachmentNotFoundError(ProductionDomainError):
+    """Raised when attachment metadata or physical content is missing."""

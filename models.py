@@ -160,3 +160,4 @@ class AppSettings:
     objects_database_path: str = ""
     products_database_path: str = ""
     aliases_database_path: str = ""
+    attachment_root: str = ""

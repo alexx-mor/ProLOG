@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, fields
+from pathlib import Path
 
-from constants import CONFIG_FILE
+from constants import ATTACHMENTS_DIR, CONFIG_FILE
 from models import AppSettings
 
 logger = logging.getLogger(__name__)
@@ -38,3 +39,11 @@ class ConfigManager:
         except OSError as exc:
             logger.exception("Failed to save config: %s", exc)
             raise
+
+
+def attachment_root_path(settings: AppSettings) -> Path:
+    """Resolve the configured root without embedding it in attachment metadata."""
+
+    if settings.attachment_root:
+        return Path(settings.attachment_root).expanduser()
+    return ATTACHMENTS_DIR

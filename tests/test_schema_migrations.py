@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from constants import APP_VERSION
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from database_integrity import CrossDatabaseIntegrityError
 from models import Employee, ProductItem, WorkLogEntry
@@ -27,7 +28,7 @@ def test_all_component_databases_receive_baseline_version(tmp_path: Path) -> Non
 
     versions = database.schema_versions()
     assert {info.component: info.current_version for info in versions} == {
-        "prolog": 2,
+        "prolog": 3,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -45,7 +46,7 @@ def test_all_component_databases_receive_baseline_version(tmp_path: Path) -> Non
             assert row["version"] == 1
             assert row["name"]
             assert len(row["checksum"]) == 64
-            assert row["app_version"] == "0.5.9"
+            assert row["app_version"] == APP_VERSION
             assert row["applied_at"].endswith("+00:00")
 
 
@@ -58,7 +59,7 @@ def test_repeated_initialization_does_not_repeat_baseline(tmp_path: Path) -> Non
 
     assert _migration_history(database) == before
     assert {component: len(rows) for component, rows in before.items()} == {
-        "prolog": 2,
+        "prolog": 3,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -108,7 +109,7 @@ def test_current_unversioned_working_database_starts_without_data_changes(
     assert entry is not None
     assert entry.hours == 7.5
     assert {info.component: info.current_version for info in database.schema_versions()} == {
-        "prolog": 2,
+        "prolog": 3,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -124,8 +125,8 @@ def test_unknown_newer_schema_version_blocks_startup(tmp_path: Path) -> None:
         connection.execute(
             """
             UPDATE main.SchemaMigrations
-            SET version = 3
-            WHERE component = 'prolog' AND version = 2
+            SET version = 4
+            WHERE component = 'prolog' AND version = 3
             """
         )
 
@@ -139,9 +140,10 @@ def test_newer_component_blocks_core_migration_before_any_write(tmp_path: Path) 
     database = Database(tmp_path / "prolog.sqlite3")
     database.initialize()
     with database.connect() as connection:
+        connection.execute("DROP TABLE Attachments")
         connection.execute("DROP TABLE ProductionStages")
         connection.execute(
-            "DELETE FROM main.SchemaMigrations WHERE component = 'prolog' AND version = 2"
+            "DELETE FROM main.SchemaMigrations WHERE component = 'prolog' AND version >= 2"
         )
         connection.execute(
             """
@@ -160,6 +162,9 @@ def test_newer_component_blocks_core_migration_before_any_write(tmp_path: Path) 
         ).fetchone()[0] == 1
         assert connection.execute(
             "SELECT 1 FROM main.sqlite_master WHERE name = 'ProductionStages'"
+        ).fetchone() is None
+        assert connection.execute(
+            "SELECT 1 FROM main.sqlite_master WHERE name = 'Attachments'"
         ).fetchone() is None
 
 

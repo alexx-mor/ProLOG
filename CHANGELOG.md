@@ -1,5 +1,52 @@
 ﻿# Changelog
 
+## 2026-08-09 - Production attachment storage (P3)
+
+### Added
+
+- Added core schema migration `3` with the `Attachments` metadata table and
+  indexes for SHA-256, storage keys and future source identifiers.
+- Added an infrastructure-neutral `AttachmentStore` contract and a local
+  content-addressed implementation with relative portable storage keys.
+- Added atomic original-byte writes using an in-root temporary file, flush,
+  fsync, SHA-256 verification and atomic rename before SQLite metadata commit.
+- Added dedicated `AttachmentRepository` and `AttachmentService` components.
+- Added content inspection for MIME type, image dimensions and reliable
+  timezone-qualified EXIF capture time without modifying original bytes.
+- Added structured diagnostics for missing, corrupt, orphaned and temporary
+  files, invalid storage keys and unavailable storage roots.
+- Added configurable `attachment_root` with portable default
+  `data/attachments/` and documented coordinated backup/recovery rules.
+
+### Architecture
+
+- `Attachment` metadata and physical content remain separate. Equal SHA-256
+  content is stored once while distinct origins retain distinct metadata rows.
+- A complete source identity is idempotent; SHA-256 itself is intentionally not
+  unique.
+- SQLite and the filesystem are coordinated in an explicit recoverable order,
+  without pretending they form one distributed transaction.
+- No ProductionEvent, event-attachment relation, MAX media, production inbox,
+  timeline, AI or production UI was introduced.
+- Only core advances to schema version `3`; all component databases and
+  WorkBot remain at version `1`.
+- Application and packaged Windows version advance from `0.5.9` to `0.5.10`.
+
+### Verified
+
+- All project tests pass: `121 passed`.
+- P3 tests cover migration, retry, rollback, component isolation, byte
+  preservation, JPEG/PNG metadata, deduplication, source idempotency, path
+  traversal, root relocation, failure recovery and all diagnostic findings.
+- Dry-run completed at `backups/p3-dry-run-20260809-174847`: legacy rows stayed
+  equal, component files stayed byte-identical, integrity/reference checks and
+  store/read/verify/diagnostics passed.
+- Active databases were backed up to `backups/pre-p3-20260809-173400` before
+  migration.
+- Working core migrated to schema v3 with an empty `Attachments` table and a
+  healthy empty `dist/ProLOG/data/attachments` root; legacy rows and all other
+  database files remained unchanged.
+
 ## 2026-08-09 - Production stages directory (P2)
 
 ### Added

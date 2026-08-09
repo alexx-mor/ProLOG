@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 APP_NAME = "ProLOG"
-APP_VERSION = "0.5.9"
+APP_VERSION = "0.5.10"
 GITHUB_OWNER = "alexx-mor"
 GITHUB_REPO = "ProLOG"
 
@@ -28,6 +28,7 @@ EMPLOYEES_DATABASE_FILE = DATA_DIR / "employees.sqlite3"
 OBJECTS_DATABASE_FILE = DATA_DIR / "objects.sqlite3"
 PRODUCTS_DATABASE_FILE = DATA_DIR / "products.sqlite3"
 ALIASES_DATABASE_FILE = DATA_DIR / "aliases.sqlite3"
+ATTACHMENTS_DIR = DATA_DIR / "attachments"
 
 DATE_FORMAT = "%Y-%m-%d"
 DISPLAY_DATETIME_FORMAT = "%H:%M"

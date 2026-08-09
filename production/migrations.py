@@ -35,6 +35,42 @@ CREATE TABLE IF NOT EXISTS ProductionStages (
 """
 
 
+ATTACHMENTS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS Attachments (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    storage_key TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL CHECK(size_bytes >= 0),
+    width INTEGER NULL CHECK(width IS NULL OR width > 0),
+    height INTEGER NULL CHECK(height IS NULL OR height > 0),
+    captured_at_utc TEXT NULL,
+    received_at_utc TEXT NOT NULL,
+    source_type TEXT NULL,
+    source_message_id TEXT NULL,
+    source_attachment_id TEXT NULL,
+    created_at_utc TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_sha256
+ON Attachments(sha256);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_storage_key
+ON Attachments(storage_key);
+
+CREATE INDEX IF NOT EXISTS idx_attachments_source_message
+ON Attachments(source_type, source_message_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_attachments_source_identity
+ON Attachments(source_type, source_message_id, source_attachment_id)
+WHERE source_type IS NOT NULL AND TRIM(source_type) <> ''
+  AND source_message_id IS NOT NULL AND TRIM(source_message_id) <> ''
+  AND source_attachment_id IS NOT NULL AND TRIM(source_attachment_id) <> '';
+"""
+
+
 def apply_production_stages_migration(connection: sqlite3.Connection) -> None:
     """Create and seed the standalone production-stage directory."""
 
@@ -57,3 +93,11 @@ def seed_production_stages(connection: sqlite3.Connection) -> None:
             """,
             (str(uuid4()), code, name, sort_order, now, now),
         )
+
+
+def apply_attachments_migration(connection: sqlite3.Connection) -> None:
+    """Create attachment metadata storage without touching physical files."""
+
+    from schema_migrations import execute_sql_script
+
+    execute_sql_script(connection, ATTACHMENTS_SCHEMA_SQL)

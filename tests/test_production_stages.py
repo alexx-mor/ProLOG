@@ -34,9 +34,10 @@ def _service(database: Database) -> ProductionStageService:
 
 def _downgrade_core_to_v1(database: Database) -> None:
     with database.connect() as connection:
+        connection.execute("DROP TABLE Attachments")
         connection.execute("DROP TABLE ProductionStages")
         connection.execute(
-            "DELETE FROM main.SchemaMigrations WHERE component = 'prolog' AND version = 2"
+            "DELETE FROM main.SchemaMigrations WHERE component = 'prolog' AND version >= 2"
         )
 
 
@@ -44,7 +45,7 @@ def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def test_migration_v1_to_v2_preserves_existing_core_data(tmp_path: Path) -> None:
+def test_migration_from_v1_preserves_existing_core_data(tmp_path: Path) -> None:
     database = Database(tmp_path / "prolog.sqlite3")
     database.initialize()
     with database.connect() as connection:
@@ -57,7 +58,7 @@ def test_migration_v1_to_v2_preserves_existing_core_data(tmp_path: Path) -> None
 
     versions = {item.component: item.current_version for item in database.schema_versions()}
     assert versions == {
-        "prolog": 2,
+        "prolog": 3,
         "employees": 1,
         "objects": 1,
         "products": 1,

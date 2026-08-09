@@ -1,6 +1,6 @@
 # План реализации production-модуля ProLOG
 
-Статус: P0, P1 и P2 завершены; события и вложения production еще не реализованы
+Статус: P0, P1, P2 и P3 завершены; ProductionEvent еще не реализован
 Основание: `ARCHITECTURE_PROPOSAL.md` и ADR-001..ADR-006  
 Версия ProLOG на момент планирования: 0.5.8
 
@@ -136,6 +136,8 @@ UI справочника подключается только после го�
 
 ## 6. Этап P3 — файловое хранилище вложений без MAX
 
+Статус: завершен 09.08.2026.
+
 ### Миграция
 
 Добавить метаданные `Attachments` в `prolog.sqlite3`. Файлы не добавляются в
@@ -163,6 +165,22 @@ SQLite.
 
 Файл можно безопасно положить, проверить, прочитать и удалить из карантина без
 production-событий и без WorkBot.
+
+Результат:
+
+- core schema v3 содержит только metadata-таблицу `Attachments`;
+- оригиналы хранятся вне SQLite по относительному content-addressed ключу;
+- `AttachmentStore`, `LocalAttachmentStore`, `AttachmentRepository` и
+  `AttachmentService` разделяют filesystem, metadata и координацию;
+- запись выполняется через временный файл, `flush`, `fsync`, проверку SHA-256 и
+  атомарное перемещение до SQLite commit;
+- одинаковые байты дедуплицируются физически, а происхождение вложений остается
+  раздельным и повтор полной source-тройки идемпотентен;
+- diagnostics обнаруживает missing, corrupt, orphan, temp, invalid key и
+  недоступный root без автоматического удаления;
+- корень задается конфигурацией, portable default — `data/attachments/`;
+- backup/recovery описаны в `docs/ATTACHMENT_STORAGE.md`;
+- приложение и Windows EXE обновляются до версии 0.5.10.
 
 ## 7. Этап P4 — хранилище ProductionEvent
 
