@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from production.models import ProductionEventStatus, ProductionEventType
+from production.attachment_export import AttachmentExportReport
 from production.projection_models import (
     ProductionTimelineItem,
     ReadinessSource,
@@ -123,7 +125,9 @@ class ProductProductionDialog(QDialog):
         self.timeline_widget.details_requested.connect(self._show_details)
         self.timeline_widget.correction_requested.connect(self._correct_event)
         self.timeline_widget.photos_requested.connect(self._open_event_photos)
+        self.timeline_widget.export_requested.connect(self._export_event_photos)
         self.gallery.itemDoubleClicked.connect(self._open_gallery_item)
+        self.export_all_photos_button.clicked.connect(self._export_all_photos)
         self.refresh()
 
     def refresh(self) -> None:
@@ -250,10 +254,16 @@ class ProductProductionDialog(QDialog):
         self.gallery_empty = QLabel("Фотографии пока не прикреплены")
         self.gallery_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.gallery_empty.setObjectName("WizardSubtitle")
+        self.export_all_photos_button = QPushButton("Выгрузить все фотографии изделия")
+        self.export_all_photos_button.setMinimumWidth(260)
+        actions = QHBoxLayout()
+        actions.addWidget(self.export_all_photos_button)
+        actions.addStretch()
         layout = QVBoxLayout(tab)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.addWidget(self.gallery_empty)
         layout.addWidget(self.gallery, 1)
+        layout.addLayout(actions)
         return tab
 
     def _refresh_header(self, state) -> None:
@@ -363,6 +373,7 @@ class ProductProductionDialog(QDialog):
                 self.gallery.addItem(item)
         self.gallery_empty.setVisible(not self.photos)
         self.gallery.setVisible(bool(self.photos))
+        self.export_all_photos_button.setEnabled(bool(self.photos))
 
     def _thumbnail_icon(self, attachment_id: int) -> QIcon:
         canvas = QPixmap(180, 125)
@@ -511,6 +522,58 @@ class ProductProductionDialog(QDialog):
             for attachment in item.attachments
         ]
         ProductionPhotoViewer(self.controller, photos, self).exec()
+
+    def _export_event_photos(self, event_id: int) -> None:
+        destination = QFileDialog.getExistingDirectory(
+            self,
+            "Выгрузить фотографии события",
+        )
+        if not destination:
+            return
+        try:
+            report = self.controller.export_event_photos(
+                self.product_id,
+                event_id,
+                destination,
+            )
+            self._show_export_report(report)
+        except Exception as exc:
+            logger.exception("Не удалось выгрузить фотографии события")
+            self._show_error(production_error_message(exc))
+
+    def _export_all_photos(self) -> None:
+        destination = QFileDialog.getExistingDirectory(
+            self,
+            "Выгрузить все фотографии изделия",
+        )
+        if not destination:
+            return
+        try:
+            report = self.controller.export_product_photos(
+                self.product_id,
+                destination,
+            )
+            self._show_export_report(report)
+        except Exception as exc:
+            logger.exception("Не удалось выгрузить фотографии изделия")
+            self._show_error(production_error_message(exc))
+
+    def _show_export_report(self, report: AttachmentExportReport) -> None:
+        message = f"Выгружено файлов: {len(report.exported_paths)}"
+        if report.exported_paths:
+            message += f"\nПапка: {report.exported_paths[0].parent}"
+        if report.failures:
+            errors = "\n".join(
+                f"- {failure.original_name}: {failure.message}"
+                for failure in report.failures
+            )
+            QMessageBox.warning(
+                self,
+                "Экспорт фотографий завершен с ошибками",
+                f"{message}\n\nНе удалось выгрузить:\n{errors}",
+            )
+            return
+        QMessageBox.information(self, "Экспорт фотографий", message)
 
     def _open_gallery_item(self, item: QListWidgetItem) -> None:
         index = item.data(Qt.ItemDataRole.UserRole)

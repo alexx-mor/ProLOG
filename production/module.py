@@ -7,6 +7,7 @@ from pathlib import Path
 
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from production.attachment_repository import AttachmentRepository
+from production.attachment_export import AttachmentExportService
 from production.attachment_service import AttachmentService
 from production.event_repository import ProductionEventRepository
 from production.event_service import ProductionService
@@ -20,6 +21,7 @@ from production.service import ProductionStageService
 class ProductionModule:
     stages: ProductionStageService
     attachments: AttachmentService
+    exports: AttachmentExportService
     events: ProductionService
     projections: ProductionProjectionService
 
@@ -44,12 +46,14 @@ def build_production_module(
         employees,
         worklogs,
     )
+    attachment_service = AttachmentService(
+        attachments,
+        LocalAttachmentStore(attachment_root),
+    )
     return ProductionModule(
         stages=ProductionStageService(stages),
-        attachments=AttachmentService(
-            attachments,
-            LocalAttachmentStore(attachment_root),
-        ),
+        attachments=attachment_service,
+        exports=AttachmentExportService(attachment_service),
         events=ProductionService(
             events,
             stages,

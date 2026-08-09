@@ -9,6 +9,11 @@ from typing import Callable
 
 from auth import AuthSession
 from models import Employee, ProductItem, WorkLogEntry
+from production.attachment_export import (
+    AttachmentExportReport,
+    AttachmentExportRequest,
+    AttachmentExportService,
+)
 from production.actor_adapter import actor_from_auth_session
 from production.attachment_service import AttachmentService
 from production.commands import (
@@ -53,6 +58,12 @@ class ProductionEventFormData:
     idempotency_key: str
 
 
+@dataclass(frozen=True, slots=True)
+class ProductProductionListItem:
+    product: ProductItem
+    state: ProductProductionState
+
+
 class ProductionUiController:
     """Stable boundary consumed by production widgets and dialogs."""
 
@@ -65,6 +76,7 @@ class ProductionUiController:
         events: ProductionService,
         projections: ProductionProjectionService,
         attachments: AttachmentService,
+        exports: AttachmentExportService,
         session_provider: Callable[[], AuthSession],
         *,
         local_timezone: tzinfo | None = None,
@@ -76,6 +88,7 @@ class ProductionUiController:
         self.events = events
         self.projections = projections
         self.attachments = attachments
+        self.exports = exports
         self.session_provider = session_provider
         self.local_timezone = local_timezone or datetime.now().astimezone().tzinfo or timezone.utc
 
@@ -107,6 +120,13 @@ class ProductionUiController:
 
     def employees_for_reporting(self) -> list[Employee]:
         return self.employees.list()
+
+    def production_list(self) -> list[ProductProductionListItem]:
+        return [
+            ProductProductionListItem(product, self.state(product.id or 0))
+            for product in self.products.list_products(active_only=True)
+            if product.id is not None
+        ]
 
     def create_draft(
         self,
@@ -188,6 +208,50 @@ class ProductionUiController:
     def attachment_bytes(self, attachment_id: int) -> bytes:
         return self.attachments.read_bytes(attachment_id)
 
+    def attachment_original_name(self, attachment_id: int) -> str:
+        return self.attachments.get_attachment(attachment_id).original_name
+
+    def export_attachment(self, attachment_id: int, destination: str | Path) -> Path:
+        return self.exports.export_one(attachment_id, Path(destination))
+
+    def export_event_photos(
+        self,
+        product_id: int,
+        event_id: int,
+        destination_root: str | Path,
+    ) -> AttachmentExportReport:
+        item = next(
+            (
+                timeline_item
+                for timeline_item in self.timeline(product_id, include_audit=True)
+                if timeline_item.event.id == event_id
+            ),
+            None,
+        )
+        if item is None:
+            raise ValueError("Производственная запись не найдена")
+        product = self.product(product_id)
+        return self.exports.export_batch(
+            self._export_requests(product, [item]),
+            Path(destination_root),
+            product_subdirectory=False,
+        )
+
+    def export_product_photos(
+        self,
+        product_id: int,
+        destination_root: str | Path,
+    ) -> AttachmentExportReport:
+        product = self.product(product_id)
+        return self.exports.export_batch(
+            self._export_requests(
+                product,
+                self.timeline(product_id, include_audit=True),
+            ),
+            Path(destination_root),
+            product_subdirectory=True,
+        )
+
     def requires_readiness_resolution(
         self,
         product_id: int,
@@ -209,6 +273,25 @@ class ProductionUiController:
 
     def utc_to_local(self, value: datetime) -> datetime:
         return value.astimezone(self.local_timezone)
+
+    @staticmethod
+    def _export_requests(
+        product: ProductItem,
+        timeline: list[ProductionTimelineItem],
+    ) -> list[AttachmentExportRequest]:
+        product_label = product.code.strip() or product.name.strip() or "Изделие"
+        return [
+            AttachmentExportRequest(
+                attachment_id=attachment.attachment.id or 0,
+                observed_at_utc=item.event.observed_at_utc,
+                product_label=product_label,
+                stage_name=item.stage.name if item.stage else "Этап не указан",
+                sort_order=attachment.sort_order,
+            )
+            for item in timeline
+            for attachment in item.attachments
+            if attachment.attachment.id is not None
+        ]
 
 
 def production_error_message(error: Exception) -> str:

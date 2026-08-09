@@ -8,9 +8,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QMessageBox,
     QVBoxLayout,
     QWidget,
 )
@@ -54,11 +56,13 @@ class ProductionPhotoViewer(QDialog):
         self.caption.setWordWrap(True)
         self.previous_button = QPushButton("Назад")
         self.next_button = QPushButton("Далее")
+        self.save_button = QPushButton("Сохранить оригинал...")
         self.close_button = QPushButton("Закрыть")
 
         actions = QHBoxLayout()
         actions.addWidget(self.previous_button)
         actions.addWidget(self.next_button)
+        actions.addWidget(self.save_button)
         actions.addStretch()
         actions.addWidget(self.close_button)
         layout = QVBoxLayout(self)
@@ -68,6 +72,7 @@ class ProductionPhotoViewer(QDialog):
 
         self.previous_button.clicked.connect(lambda: self._move(-1))
         self.next_button.clicked.connect(lambda: self._move(1))
+        self.save_button.clicked.connect(self._save_current)
         self.close_button.clicked.connect(self.accept)
         self._show_current()
 
@@ -84,6 +89,7 @@ class ProductionPhotoViewer(QDialog):
     def _show_current(self) -> None:
         self.previous_button.setEnabled(len(self.photos) > 1)
         self.next_button.setEnabled(len(self.photos) > 1)
+        self.save_button.setEnabled(bool(self.photos))
         if not self.photos:
             self.image_label.setText("Фотографии отсутствуют")
             self.caption.clear()
@@ -109,3 +115,28 @@ class ProductionPhotoViewer(QDialog):
         except Exception as exc:
             self.image_label.setPixmap(QPixmap())
             self.image_label.setText(f"Файл недоступен\n{exc}")
+
+    def _save_current(self) -> None:
+        if not self.photos:
+            return
+        attachment = self.photos[self.index].timeline_attachment.attachment
+        destination, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить оригинал",
+            attachment.original_name,
+            "Все файлы (*.*)",
+        )
+        if not destination:
+            return
+        try:
+            exported = self.controller.export_attachment(
+                attachment.id or 0,
+                destination,
+            )
+            QMessageBox.information(
+                self,
+                "Экспорт фотографии",
+                f"Оригинал сохранен:\n{exported}",
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Экспорт фотографии", str(exc))

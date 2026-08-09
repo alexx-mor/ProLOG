@@ -17,6 +17,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=[
         "production.attachment_inspection",
+        "production.attachment_export",
         "production.attachment_repository",
         "production.attachment_service",
         "production.attachment_store",

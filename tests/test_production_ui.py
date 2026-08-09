@@ -17,12 +17,13 @@ from database import Database, DirectoryRepository, EmployeeRepository, WorkLogR
 from models import Employee, ProductItem, WorkLogEntry
 from production.actor_adapter import actor_from_auth_session
 from production.models import ProductionEventStatus, ProductionEventType
-from production.module import build_production_module
+from production.module import ProductionModule, build_production_module
 from services import DirectoryService, EmployeeService, WorkLogService
 from ui.product_production_dialog import ProductProductionDialog
 from ui.production_controller import ProductionEventFormData, ProductionUiController
 from ui.production_event_dialog import ProductionEventDialog
 from ui.production_photo_viewer import ProductionPhotoViewer
+from ui.production_overview_widget import ProductionOverviewWidget
 
 
 PNG_1X1 = base64.b64decode(
@@ -41,6 +42,8 @@ class UiContext:
     employees: EmployeeService
     worklogs: WorkLogService
     controller: ProductionUiController
+    production_module: ProductionModule
+    attachment_root: Path
     product_id: int
     object_id: int
     employee_id: int
@@ -72,7 +75,8 @@ def context(tmp_path: Path) -> UiContext:
         )
     )
     employee_id = employees_repository.save(Employee("Иванов Иван Иванович"))
-    module = build_production_module(database, tmp_path / "attachments")
+    attachment_root = tmp_path / "attachments"
+    module = build_production_module(database, attachment_root)
     session = AuthSession(
         username="Руководитель",
         role=ROLE_ADMIN,
@@ -88,6 +92,7 @@ def context(tmp_path: Path) -> UiContext:
         module.events,
         module.projections,
         module.attachments,
+        module.exports,
         lambda: session,
         local_timezone=MSK,
     )
@@ -100,6 +105,8 @@ def context(tmp_path: Path) -> UiContext:
         employees,
         worklogs,
         controller,
+        module,
+        attachment_root,
         product_id,
         object_id,
         employee_id,
@@ -303,6 +310,7 @@ def test_production_ui_has_no_persistence_or_workbot_imports() -> None:
         Path("ui/production_timeline_widget.py"),
         Path("ui/production_photo_viewer.py"),
         Path("ui/product_production_dialog.py"),
+        Path("ui/production_overview_widget.py"),
     )
     forbidden = {"sqlite3", "workbot", "production.event_repository", "production.local_attachment_store"}
     for path in paths:
@@ -319,3 +327,153 @@ def test_production_ui_has_no_persistence_or_workbot_imports() -> None:
             if isinstance(node, ast.ImportFrom)
         )
         assert imports.isdisjoint(forbidden), path
+
+
+def test_production_overview_uses_projection_and_opens_existing_card(
+    context: UiContext,
+) -> None:
+    _confirmed(context, 45, "overview")
+    widget = ProductionOverviewWidget(context.controller)
+    opened: list[int] = []
+    widget.card_requested.connect(opened.append)
+
+    widget.refresh()
+
+    assert widget.table.rowCount() == 1
+    assert widget.table.item(0, 5).text() == "45%"
+    assert widget.table.item(0, 6).text() == "История"
+    widget.table.doubleClicked.emit(widget.table.model().index(0, 0))
+    assert opened == [context.product_id]
+
+
+def test_production_overview_search_and_filters(context: UiContext) -> None:
+    widget = ProductionOverviewWidget(context.controller)
+    widget.refresh()
+
+    widget.search.setText("p6-001")
+    assert widget.table.rowCount() == 1
+    widget.search.setText("несуществующее изделие")
+    assert widget.table.rowCount() == 0
+    widget.search.clear()
+    widget.object_filter.setCurrentIndex(1)
+    assert widget.table.rowCount() == 1
+
+
+def test_production_overview_layout_fits_fhd_and_4k(
+    context: UiContext,
+    application: QApplication,
+) -> None:
+    widget = ProductionOverviewWidget(context.controller)
+    widget.refresh()
+    for width, height in ((1600, 900), (3840, 2160)):
+        widget.resize(width, height)
+        widget.show()
+        application.processEvents()
+        assert widget.table.geometry().right() <= widget.rect().right()
+        assert widget.open_button.geometry().bottom() <= widget.rect().bottom()
+    widget.close()
+
+
+def test_export_one_preserves_original_bytes_and_hides_storage_key(
+    context: UiContext,
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.png"
+    source.write_bytes(PNG_1X1)
+    attachment = context.controller.store_photo(source)
+    before = context.production_module.attachments.get_attachment(attachment.id or 0)
+
+    exported = context.controller.export_attachment(
+        attachment.id or 0,
+        tmp_path / "export" / "Фото шкафа",
+    )
+
+    after = context.production_module.attachments.get_attachment(attachment.id or 0)
+    assert exported.read_bytes() == PNG_1X1
+    assert exported.suffix == ".png"
+    assert before == after
+    assert attachment.sha256 not in exported.name
+    assert attachment.storage_key not in str(exported)
+
+
+def test_export_duplicate_names_never_overwrite(context: UiContext, tmp_path: Path) -> None:
+    source = tmp_path / "duplicate.png"
+    source.write_bytes(PNG_1X1)
+    attachment = context.controller.store_photo(source)
+    requested = tmp_path / "export" / "Одинаковое имя.png"
+
+    first = context.controller.export_attachment(attachment.id or 0, requested)
+    second = context.controller.export_attachment(attachment.id or 0, requested)
+
+    assert first != second
+    assert first.exists() and second.exists()
+    assert second.stem.endswith("_2")
+
+
+def test_batch_export_writes_multiple_structured_files(
+    context: UiContext,
+    tmp_path: Path,
+) -> None:
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    first_path.write_bytes(PNG_1X1)
+    second_path.write_bytes(PNG_1X1)
+    first = context.controller.store_photo(first_path)
+    second = context.controller.store_photo(second_path)
+    event = context.controller.create_draft(
+        context.product_id,
+        _form(55, key="batch-export"),
+    )
+    context.controller.attach_photo(event.id or 0, first.id or 0, 0)
+    context.controller.attach_photo(event.id or 0, second.id or 0, 1)
+    confirmed = context.controller.confirm_draft(event.id or 0)
+    metadata_before = (
+        context.production_module.attachments.get_attachment(first.id or 0),
+        context.production_module.attachments.get_attachment(second.id or 0),
+    )
+
+    report = context.controller.export_product_photos(
+        context.product_id,
+        tmp_path / "batch",
+    )
+
+    assert report.is_successful
+    assert len(report.exported_paths) == 2
+    assert all(path.read_bytes() == PNG_1X1 for path in report.exported_paths)
+    assert all("2026-08-09" in path.name for path in report.exported_paths)
+    assert context.controller.events.get_event(confirmed.id or 0) == confirmed
+    assert metadata_before == (
+        context.production_module.attachments.get_attachment(first.id or 0),
+        context.production_module.attachments.get_attachment(second.id or 0),
+    )
+
+
+def test_batch_export_continues_when_one_original_is_missing(
+    context: UiContext,
+    tmp_path: Path,
+) -> None:
+    good_path = tmp_path / "good.png"
+    missing_path = tmp_path / "missing.png"
+    good_path.write_bytes(PNG_1X1)
+    missing_path.write_bytes(PNG_1X1 + b"different")
+    good = context.controller.store_photo(good_path)
+    missing = context.controller.store_photo(missing_path)
+    event = context.controller.create_draft(
+        context.product_id,
+        _form(None, description="Фотографии", key="partial-export"),
+    )
+    context.controller.attach_photo(event.id or 0, good.id or 0, 0)
+    context.controller.attach_photo(event.id or 0, missing.id or 0, 1)
+    context.controller.confirm_draft(event.id or 0)
+    missing_file = context.attachment_root / Path(missing.storage_key)
+    missing_file.unlink()
+
+    report = context.controller.export_product_photos(
+        context.product_id,
+        tmp_path / "partial",
+    )
+
+    assert len(report.exported_paths) == 1
+    assert len(report.failures) == 1
+    assert report.failures[0].attachment_id == missing.id
+    assert report.exported_paths[0].read_bytes() == PNG_1X1

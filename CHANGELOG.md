@@ -1,5 +1,45 @@
 ﻿# Changelog
 
+## 2026-08-09 - Production operations and photo export (P6.1)
+
+### Added
+
+- Added a standalone `Производство` tab to the main window with Product
+  projection rows, search, object/stage filters and direct card opening.
+- Added `AttachmentExportService` for verified single and batch original-byte
+  export without exposing content-addressed storage paths.
+- Added photo export actions to the viewer, event timeline and aggregate
+  product gallery.
+- Added Windows-safe structured export names, collision suffixes and partial
+  batch reports that continue after an unavailable original.
+
+### Architecture
+
+- The overview reuses Product, ProductionStage and ProductionProjectionService;
+  no second Product model or production service was introduced.
+- Export reads through AttachmentService and never changes Attachment metadata,
+  ProductionEvent rows or managed originals.
+- No schema migration, lifecycle change, WorkBot/MAX integration, historical
+  import, analytics or AI was added. Core remains `4`, components/WorkBot `1`.
+- Future MAX-group media and reviewed historical import requirements, including
+  explicit historical-time precision, are recorded only in the backlog.
+- Application version advances from `0.6.0` to `0.6.1`.
+
+### Verified
+
+- Added seven P6.1 scenarios to the production UI suite; all project tests pass
+  with `198 passed`.
+- Working portable data and the previous `0.6.0` executable were backed up to
+  `backups/pre-p6.1-20260809-230321` before deployment.
+- The copied-data scenario at `backups/p6.1-dry-run-20260809-230329` verified
+  single, event and full-product export, collision-safe repeated export,
+  partial completion with an unavailable original, and FHD/4K geometry.
+- Staged and deployed Windows executables both passed eight-second process
+  smoke tests and report file/product version `0.6.1`.
+- Post-deployment core/component/WorkBot integrity, cross-database references
+  and attachment diagnostics pass. Existing user-table row signatures are
+  unchanged from the pre-P6.1 backup.
+
 ## 2026-08-09 - Manual production UI (P6)
 
 ### Added

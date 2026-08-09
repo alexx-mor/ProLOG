@@ -39,6 +39,7 @@ from ui.employee_widget import EmployeeWidget
 from ui.legacy_import_dialog import LegacyImportDialog
 from ui.product_production_dialog import ProductProductionDialog
 from ui.production_controller import ProductionUiController
+from ui.production_overview_widget import ProductionOverviewWidget
 from ui.report_viewer_widget import ReportViewerWidget
 from ui.setup_wizard import InitialSetupDialog
 from ui.style import APP_STYLESHEET
@@ -75,6 +76,7 @@ class MainWindow(QMainWindow):
             self.production_module.events,
             self.production_module.projections,
             self.production_module.attachments,
+            self.production_module.exports,
             lambda: self.auth_session,
         )
         self.analytics = AnalyticsService(self.worklogs, self.employees, self.directories)
@@ -91,6 +93,7 @@ class MainWindow(QMainWindow):
         self.worklog_widget = WorkLogWidget()
         self.report_viewer = ReportViewerWidget()
         self.analytics_widget = AnalyticsWidget()
+        self.production_overview = ProductionOverviewWidget(self.production_ui)
         self.workbot_inbox = WorkBotInboxWidget(self.workbot)
         self.workbot_inbox.set_source_path(self.config.workbot_database_path)
         self.workbot_inbox.set_reviewer(self.auth_session.username)
@@ -154,6 +157,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.splitter, "Заполнение отчетов")
         self.tabs.addTab(self.workbot_inbox, "Входящие отчеты")
+        self.tabs.addTab(self.production_overview, "Производство")
         self.tabs.addTab(self.report_viewer, "Просмотр отчетов")
         self.tabs.addTab(self.analytics_widget, "Аналитика")
         self.setCentralWidget(self.tabs)
@@ -198,6 +202,7 @@ class MainWindow(QMainWindow):
         self.report_viewer.entry_open_requested.connect(self.open_worklog_entry)
         self.report_viewer.entry_delete_requested.connect(self.delete_worklog_entry)
         self.analytics_widget.filters_changed.connect(self.refresh_analytics)
+        self.production_overview.card_requested.connect(self.open_product_production)
         self.workbot_inbox.source_path_changed.connect(self._save_workbot_source_path)
         self.workbot_inbox.imported.connect(self.refresh_worklogs)
         self.workbot_inbox.bindings_changed.connect(self.refresh_employees)
@@ -218,6 +223,7 @@ class MainWindow(QMainWindow):
         self.report_viewer.set_objects(self.directories.list_all("objects"))
         self.analytics_widget.set_objects(self.directories.list_all("objects"))
         self.analytics_widget.set_products(self.directories.list_products(active_only=False))
+        self.production_overview.refresh()
         self._refresh_workbot_reference_data()
 
     def refresh_employees(self, search: str = "") -> None:
@@ -493,6 +499,7 @@ class MainWindow(QMainWindow):
         dialog.exec()
         self.refresh_directories()
         self.refresh_analytics()
+        self.production_overview.refresh()
 
     def save_worklog(self, entry) -> None:
         saved = self._run(lambda: self.worklogs.save(entry), "Запись сохранена")

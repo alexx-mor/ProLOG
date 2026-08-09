@@ -48,6 +48,7 @@ class ProductionTimelineWidget(QWidget):
     details_requested = Signal(int)
     correction_requested = Signal(int)
     photos_requested = Signal(int)
+    export_requested = Signal(int)
 
     def __init__(
         self,
@@ -101,6 +102,7 @@ class ProductionTimelineWidget(QWidget):
         self.details_button = QPushButton("Подробнее")
         self.correct_button = QPushButton("Исправить запись")
         self.photos_button = QPushButton("Открыть фотографии")
+        self.export_button = QPushButton("Выгрузить фотографии события")
         self._update_actions()
 
         top = QHBoxLayout()
@@ -110,6 +112,7 @@ class ProductionTimelineWidget(QWidget):
         actions.addWidget(self.details_button)
         actions.addWidget(self.correct_button)
         actions.addWidget(self.photos_button)
+        actions.addWidget(self.export_button)
         actions.addStretch()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -124,6 +127,7 @@ class ProductionTimelineWidget(QWidget):
         self.details_button.clicked.connect(self._emit_details)
         self.correct_button.clicked.connect(self._emit_correction)
         self.photos_button.clicked.connect(self._emit_photos)
+        self.export_button.clicked.connect(self._emit_export)
 
     def set_items(self, items: Iterable[ProductionTimelineItem]) -> None:
         selected_id = self.selected_event_id()
@@ -231,6 +235,7 @@ class ProductionTimelineWidget(QWidget):
         has_item = item is not None and item.event.id is not None
         self.details_button.setEnabled(has_item)
         self.photos_button.setEnabled(has_item and bool(item.attachments))
+        self.export_button.setEnabled(has_item and bool(item.attachments))
         self.correct_button.setEnabled(
             has_item and item.event.status is ProductionEventStatus.CONFIRMED
         )
@@ -249,3 +254,8 @@ class ProductionTimelineWidget(QWidget):
         event_id = self.selected_event_id()
         if event_id is not None:
             self.photos_requested.emit(event_id)
+
+    def _emit_export(self) -> None:
+        event_id = self.selected_event_id()
+        if event_id is not None:
+            self.export_requested.emit(event_id)
