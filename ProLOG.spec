@@ -26,6 +26,8 @@ a = Analysis(
         "production.event_service",
         "production.projection_models",
         "production.projections",
+        "production.actor_adapter",
+        "production.module",
     ],
     hookspath=[],
     hooksconfig={},

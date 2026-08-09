@@ -125,6 +125,9 @@ class DirectoryService:
     def list_products(self, active_only: bool = False) -> list[ProductItem]:
         return self.repository.list_products(active_only)
 
+    def get_product(self, product_id: int) -> ProductItem | None:
+        return self.repository.get_product(product_id)
+
     def save_product(self, product: ProductItem) -> int:
         return self.repository.save_product(product)
 

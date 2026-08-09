@@ -123,6 +123,18 @@ QFrame#EmployeeContext {
     border: 1px solid #d7dde3;
     border-radius: 4px;
 }
+QFrame#ProductionHeader {
+    background: #f8fafc;
+    border: 1px solid #d7dde3;
+    border-radius: 6px;
+}
+QLabel#ProductionModeNote {
+    color: #425466;
+    background: #eef5fb;
+    border: 1px solid #cbdbe8;
+    border-radius: 4px;
+    padding: 8px;
+}
 QToolTip {
     background: #ffffff;
     color: #1f2328;

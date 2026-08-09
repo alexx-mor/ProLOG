@@ -1013,6 +1013,7 @@ class DirectoryDialog(QDialog):
         current_database_paths: dict[str, Path] | None = None,
         employee_service=None,
         production_stage_service=None,
+        product_production_opener=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Справочники")
@@ -1020,6 +1021,7 @@ class DirectoryDialog(QDialog):
         self.directory_service = directory_service
         self.employee_service = employee_service
         self.production_stage_service = production_stage_service
+        self.product_production_opener = product_production_opener
         self.database_registry = database_registry or DatabaseRegistry()
         self.config_manager = config_manager or ConfigManager()
         self.app_settings = app_settings or self.config_manager.load()
@@ -1109,6 +1111,7 @@ class DirectoryDialog(QDialog):
         self.delete_button = QPushButton("Удалить")
         self.move_up_button = QPushButton("Вверх")
         self.move_down_button = QPushButton("Вниз")
+        self.production_button = QPushButton("Производство")
         self.use_database_button = QPushButton("Использовать")
         self.check_database_button = QPushButton("Проверить")
         self.close_button = QPushButton("Закрыть")
@@ -1535,6 +1538,7 @@ class DirectoryDialog(QDialog):
             self.delete_button,
             self.move_up_button,
             self.move_down_button,
+            self.production_button,
             self.use_database_button,
             self.check_database_button,
         ):
@@ -1567,6 +1571,7 @@ class DirectoryDialog(QDialog):
         self.delete_button.clicked.connect(self._delete_item)
         self.move_up_button.clicked.connect(lambda: self._move_selected(-1))
         self.move_down_button.clicked.connect(lambda: self._move_selected(1))
+        self.production_button.clicked.connect(self._open_product_production)
         self.use_database_button.clicked.connect(self._use_selected_database)
         self.check_database_button.clicked.connect(self._check_selected_database)
         self.close_button.clicked.connect(self.accept)
@@ -2047,6 +2052,16 @@ class DirectoryDialog(QDialog):
             return
         self._rename_item()
 
+    def _open_product_production(self) -> None:
+        if self.current_key != "products" or self.product_production_opener is None:
+            return
+        product = self._selected_item()
+        if product is None or product.id is None:
+            self._info("Выберите изделие")
+            return
+        self.product_production_opener(product.id, self)
+        self.refresh()
+
     def _show_context_menu(self, position) -> None:
         menu = QMenu(self)
         add_action = QAction("Добавить", self)
@@ -2093,6 +2108,12 @@ class DirectoryDialog(QDialog):
             return
         if self.current_key == "calendar":
             return
+        if self.current_key == "products" and self.product_production_opener is not None:
+            production_action = QAction("Открыть карточку производства", self)
+            production_action.setEnabled(has_item)
+            production_action.triggered.connect(self._open_product_production)
+            menu.addAction(production_action)
+            menu.addSeparator()
         for action in (rename_action, disable_action, restore_action, delete_action):
             action.setEnabled(has_item)
         move_up_action.setEnabled(has_item)
@@ -2341,6 +2362,9 @@ class DirectoryDialog(QDialog):
             is_ordered = False
         self.move_up_button.setVisible(is_ordered)
         self.move_down_button.setVisible(is_ordered)
+        self.production_button.setVisible(
+            is_products and self.product_production_opener is not None
+        )
         self.use_database_button.setVisible(is_databases)
         self.check_database_button.setVisible(is_databases)
 
@@ -2906,6 +2930,13 @@ HELP_HTML = f"""
 <h3>Импорт старых отчетов</h3>
 <p>После завершения мастера настройки используйте <b>Файл - Импорт старых отчетов Excel</b>.
 Перед переносом программа покажет ошибки, пропущенные дни, неизвестных сотрудников и новые объекты.</p>
+<h3>Ход производства изделия</h3>
+<p>Откройте <b>Настройки - Справочники - Изделия</b>, выберите изделие и нажмите
+<b>Производство</b>. В карточке можно добавить наблюдение, указать этап и готовность,
+прикрепить фотографии, посмотреть выполненные работы и историю изменений.</p>
+<p>Неверную подтвержденную запись не удаляют и не редактируют напрямую: используйте
+действие <b>Исправить запись</b>. Фактический возврат изделия фиксируется отдельным
+действием <b>Возврат / переработка</b>. Если процент не сообщался, оставьте поле пустым.</p>
 <h3>Версия</h3>
 <p>{APP_VERSION}</p>
 """

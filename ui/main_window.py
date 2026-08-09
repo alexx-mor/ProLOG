@@ -22,15 +22,14 @@ from app_modules import (
     role_can_access,
 )
 from auth import AuthService, AuthSession, role_label
-from config import ConfigManager
+from config import ConfigManager, attachment_root_path
 from constants import APP_ICON_FILE, APP_NAME
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from database_registry import DatabaseRegistry
 from legacy_import.service import LegacyExcelImportService
 from integrations.workbot.repository import WorkBotRepository
 from integrations.workbot.service import WorkBotIntegrationService
-from production.repository import ProductionStageRepository
-from production.service import ProductionStageService
+from production.module import build_production_module
 from services import AnalyticsService, DirectoryService, EmployeeService, WorkLogService
 from update_checker import UpdateChecker
 from ui.auth_dialogs import LoginDialog, UserManagementDialog
@@ -38,6 +37,8 @@ from ui.dialogs import AboutDialog, DirectoryDialog, EmployeeDialog, HelpDialog,
 from ui.analytics_widget import AnalyticsWidget
 from ui.employee_widget import EmployeeWidget
 from ui.legacy_import_dialog import LegacyImportDialog
+from ui.product_production_dialog import ProductProductionDialog
+from ui.production_controller import ProductionUiController
 from ui.report_viewer_widget import ReportViewerWidget
 from ui.setup_wizard import InitialSetupDialog
 from ui.style import APP_STYLESHEET
@@ -56,10 +57,26 @@ class MainWindow(QMainWindow):
         self.database = database
         self.auth_service = auth_service
         self.auth_session = auth_session
+        self.config_manager = ConfigManager()
+        self.config = self.config_manager.load()
         self.directories = DirectoryService(DirectoryRepository(database))
-        self.production_stages = ProductionStageService(ProductionStageRepository(database))
         self.employees = EmployeeService(EmployeeRepository(database), self.directories)
         self.worklogs = WorkLogService(WorkLogRepository(database), self.directories)
+        self.production_module = build_production_module(
+            database,
+            attachment_root_path(self.config),
+        )
+        self.production_stages = self.production_module.stages
+        self.production_ui = ProductionUiController(
+            self.directories,
+            self.employees,
+            self.worklogs,
+            self.production_module.stages,
+            self.production_module.events,
+            self.production_module.projections,
+            self.production_module.attachments,
+            lambda: self.auth_session,
+        )
         self.analytics = AnalyticsService(self.worklogs, self.employees, self.directories)
         self.legacy_importer = LegacyExcelImportService(database, self.employees, self.directories, self.worklogs)
         self.workbot = WorkBotIntegrationService(
@@ -68,8 +85,6 @@ class MainWindow(QMainWindow):
             self.directories,
             self.worklogs,
         )
-        self.config_manager = ConfigManager()
-        self.config = self.config_manager.load()
         self._startup_checked = False
         self.resize(self.config.window_width, self.config.window_height)
         self.employee_widget = EmployeeWidget()
@@ -431,6 +446,7 @@ class MainWindow(QMainWindow):
             current_database_paths=self.database.database_paths(),
             employee_service=self.employees,
             production_stage_service=self.production_stages,
+            product_production_opener=self.open_product_production,
         )
         dialog.exec()
         self.workbot_inbox.set_source_path(self.config.workbot_database_path)
@@ -455,6 +471,7 @@ class MainWindow(QMainWindow):
             current_database_paths=self.database.database_paths(),
             employee_service=self.employees,
             production_stage_service=self.production_stages,
+            product_production_opener=self.open_product_production,
         )
         dialog.exec()
         objects = self.directories.list_all("objects")
@@ -464,6 +481,18 @@ class MainWindow(QMainWindow):
             self.worklog_widget.select_object(new_objects[-1].id)
         self.refresh_analytics()
         self.statusBar().showMessage("Справочник объектов обновлен", 5000)
+
+    def open_product_production(self, product_id: int, parent=None) -> None:
+        """Open the production card through the presentation controller."""
+
+        dialog = ProductProductionDialog(
+            self.production_ui,
+            product_id,
+            parent or self,
+        )
+        dialog.exec()
+        self.refresh_directories()
+        self.refresh_analytics()
 
     def save_worklog(self, entry) -> None:
         saved = self._run(lambda: self.worklogs.save(entry), "Запись сохранена")

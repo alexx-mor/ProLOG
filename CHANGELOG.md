@@ -1,5 +1,49 @@
 ﻿# Changelog
 
+## 2026-08-09 - Manual production UI (P6)
+
+### Added
+
+- Added a separate four-tab production card for existing products with current
+  state, immutable timeline, related WorkLogs and an aggregated photo gallery.
+- Added manual observation, correction and rework workflows using the existing
+  ProductionEvent lifecycle, Actor audit, idempotency and projection refresh.
+- Added multi-file photo intake through AttachmentService and an in-memory
+  viewer with navigation and a safe unavailable-file placeholder.
+- Added Product-directory actions `Производство` and
+  `Открыть карточку производства` without expanding the legacy Product editor.
+- Added local-time/UTC conversion at the presentation boundary and explicit
+  legacy-readiness source messaging.
+
+### Architecture
+
+- Production widgets depend on a presentation controller and services only;
+  they do not import SQLite, repositories, WorkBot or AttachmentStore.
+- `ActorRef` is derived from the authenticated local user and remains distinct
+  from the optional reporting Employee.
+- No projection tables, schema migration, baseline events, MAX integration or
+  Product status mapping were introduced. Core remains schema `4`; component
+  databases and WorkBot remain schema `1`.
+- Application version advances from `0.5.12` to `0.6.0` because manual product
+  production history is the first user-facing production capability.
+
+### Verified
+
+- Added 13 focused Qt/offscreen production UI tests; the complete regression
+  suite passes with `191 passed`.
+- Working portable data was backed up to
+  `backups/pre-p6-20260809-203244`, including component databases and the
+  attachment root.
+- The full manual scenario passed on copied data at
+  `backups/p6-dry-run-20260809-203339`: seven events, two photos, a backdated
+  correction, rework, WorkLog projection, close/reopen recovery and clean
+  integrity/reference/attachment/projection diagnostics.
+- FHD and 4K offscreen geometry checks passed. The staged and deployed Windows
+  EXE both passed process smoke tests and report file/product version `0.6.0`.
+- Working ProductionEvent, relation and Attachment tables remain empty. Legacy
+  table row signatures are unchanged; startup only advanced the pre-existing
+  internal `PayRates` SQLite sequence through its idempotent seed routine.
+
 ## 2026-08-09 - Product production projections (P5)
 
 ### Added

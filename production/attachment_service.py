@@ -14,6 +14,7 @@ from production.attachment_types import (
 )
 from production.errors import (
     AttachmentIntegrityError,
+    AttachmentNotFoundError,
     AttachmentSourceExistsError,
 )
 from production.models import Attachment, require_utc_datetime, utc_now
@@ -102,6 +103,26 @@ class AttachmentService:
 
     def diagnostics(self) -> AttachmentDiagnosticsReport:
         return self.store.diagnostics(self.repository.list_for_diagnostics())
+
+    def get_attachment(self, attachment_id: int) -> Attachment:
+        attachment = self.repository.get_by_id(attachment_id)
+        if attachment is None:
+            raise AttachmentNotFoundError("Метаданные вложения не найдены")
+        return attachment
+
+    def read_bytes(self, attachment_id: int) -> bytes:
+        """Read verified original bytes without exposing a physical path."""
+
+        attachment = self.get_attachment(attachment_id)
+        verification = self.store.verify(
+            attachment.storage_key,
+            attachment.sha256,
+        )
+        if not verification.exists:
+            raise AttachmentNotFoundError("Файл вложения недоступен")
+        if not verification.is_valid:
+            raise AttachmentIntegrityError("Файл вложения поврежден")
+        return self.store.read(attachment.storage_key)
 
     def _find_existing_source(
         self,
