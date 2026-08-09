@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Callable
 from datetime import datetime
 
@@ -37,7 +38,10 @@ from production.models import (
     WorkLogRelationType,
     utc_now,
 )
+from production.projections import ProductionProjectionService
 from production.repository import ProductionStageRepository
+
+logger = logging.getLogger(__name__)
 
 
 class ProductionService:
@@ -53,6 +57,7 @@ class ProductionService:
         worklog_repository: WorkLogRepository,
         *,
         clock: Callable[[], datetime] = utc_now,
+        projection_service: ProductionProjectionService | None = None,
     ) -> None:
         self.events = event_repository
         self.stages = stage_repository
@@ -61,6 +66,14 @@ class ProductionService:
         self.employees = employee_repository
         self.worklogs = worklog_repository
         self.clock = clock
+        self.projections = projection_service or ProductionProjectionService(
+            event_repository,
+            stage_repository,
+            attachment_repository,
+            product_repository,
+            employee_repository,
+            worklog_repository,
+        )
 
     def create_event(self, command: CreateProductionEvent) -> ProductionEvent:
         if command.event_type is ProductionEventType.CORRECTION:
@@ -108,6 +121,7 @@ class ProductionService:
     def confirm_event(self, command: ConfirmProductionEvent) -> ProductionEvent:
         event = self._required(command.event_id)
         if event.status is ProductionEventStatus.CONFIRMED:
+            self._sync_readiness_snapshot(event)
             return event
         if event.status is not ProductionEventStatus.READY:
             raise InvalidProductionTransitionError(
@@ -127,12 +141,14 @@ class ProductionService:
         if event.event_type is ProductionEventType.CORRECTION:
             self._validate_correction_source(event)
         self._validate_readiness_change(event)
-        return self.events.confirm(
+        confirmed = self.events.confirm(
             command.event_id,
             command.actor,
             command.confirmed_at_utc,
             product.object_id,
         )
+        self._sync_readiness_snapshot(confirmed)
+        return confirmed
 
     def reject_event(self, command: RejectProductionEvent) -> ProductionEvent:
         event = self._required(command.event_id)
@@ -296,7 +312,7 @@ class ProductionService:
     def _validate_readiness_change(self, event: ProductionEvent) -> None:
         if event.product_id is None or event.readiness_percent is None:
             return
-        previous = self.events.latest_confirmed_readiness(event.product_id)
+        previous = self.events.previous_effective_readiness(event)
         if previous is None or event.readiness_percent >= previous:
             return
         if event.event_type in {
@@ -307,6 +323,18 @@ class ProductionService:
         if not event.change_reason.strip():
             raise UnexplainedReadinessDecreaseError(
                 "Снижение готовности observation требует сохраненной причины или rework"
+            )
+
+    def _sync_readiness_snapshot(self, event: ProductionEvent) -> None:
+        if event.product_id is None:
+            return
+        try:
+            self.projections.reconcile_product_snapshot(event.product_id)
+        except Exception:
+            logger.exception(
+                "ProductionEvent %s подтвержден, но compatibility snapshot изделия %s не синхронизирован",
+                event.id,
+                event.product_id,
             )
 
     def _validate_correction_source(self, event: ProductionEvent) -> None:

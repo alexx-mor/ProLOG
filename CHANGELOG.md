@@ -1,5 +1,45 @@
 ﻿# Changelog
 
+## 2026-08-09 - Product production projections (P5)
+
+### Added
+
+- Added typed `ProductProductionState`, `ProductionTimelineItem`, attachment/
+  WorkLog timeline items, labor intervals and structured projection diagnostics.
+- Added `ProductionProjectionService` for effective events, field-wise current
+  state, historical/audit timeline, derived labor intervals and reconciliation.
+- Added deterministic production chronology by `observed_at_utc`,
+  `recorded_at_utc`, then `id`, including backdated events and correction chains.
+- Added marked legacy readiness fallback and event-derived compatibility
+  snapshot synchronization after confirmation.
+
+### Architecture
+
+- `ProductionEvent` remains the only source of production truth. No persistent
+  projection/current-state/timeline tables or migrations were added.
+- Confirmed events are effective; superseded facts remain historical; drafts,
+  ready candidates and rejected rows affect only audit views.
+- Stage and readiness are projected independently, so NULL never erases the
+  last known value. Rework may reduce readiness without using monotonic MAX.
+- Snapshot-sync failure cannot roll back a confirmed fact. Diagnostics and an
+  explicit reconciliation operation restore only `Products.readiness_percent`.
+- `Products.product_status` is unchanged because no approved stage/status
+  mapping exists.
+- WorkLog intervals use calendar-day granularity `(previous, current]` and mark
+  same-day observations ambiguous without inventing an hourly distribution.
+- Core remains schema `4`; component DB and WorkBot remain schema `1`.
+  Application and packaged Windows version advance to `0.5.12`.
+
+### Verified
+
+- All project tests pass: `178 passed`.
+- Dry-run completed at `backups/p5-dry-run-20260809-195558` with legacy
+  fallback, field-wise projection, backdated correction, rework, Attachment,
+  WorkLog, mismatch detection and reconciliation.
+- Working data was backed up to `backups/pre-p5-20260809-195435` and remained
+  byte-identical during dry-run. No working ProductionEvent or baseline rows
+  were created.
+
 ## 2026-08-09 - Production event persistence (P4)
 
 ### Added

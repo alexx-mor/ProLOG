@@ -38,6 +38,18 @@ from production.models import (
     ProductionStage,
     WorkLogRelationType,
 )
+from production.projection_models import (
+    ProductLaborInterval,
+    ProductProductionState,
+    ProductionTimelineItem,
+    ProjectionDiagnosticIssue,
+    ProjectionDiagnosticKind,
+    ProjectionDiagnosticsReport,
+    ProjectionDiagnosticSeverity,
+    ReadinessSource,
+    TimelineAttachment,
+    TimelineWorkLog,
+)
 from production.queries import GetProductTimeline, GetProductionEvent
 
 __all__ = [
@@ -58,6 +70,8 @@ __all__ = [
     "InvalidUtcDateTimeError",
     "ObjectSnapshotManagedError",
     "ProductRequiredForConfirmationError",
+    "ProductLaborInterval",
+    "ProductProductionState",
     "ProductionDomainError",
     "ProductionEventIdempotencyConflictError",
     "ProductionEventImmutableError",
@@ -72,7 +86,15 @@ __all__ = [
     "ProductionInboxStatus",
     "ProductionSourceType",
     "ProductionStage",
+    "ProductionTimelineItem",
+    "ProjectionDiagnosticIssue",
+    "ProjectionDiagnosticKind",
+    "ProjectionDiagnosticsReport",
+    "ProjectionDiagnosticSeverity",
+    "ReadinessSource",
     "RejectProductionEvent",
     "UnexplainedReadinessDecreaseError",
+    "TimelineAttachment",
+    "TimelineWorkLog",
     "WorkLogRelationType",
 ]

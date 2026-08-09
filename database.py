@@ -1190,6 +1190,27 @@ class DirectoryRepository:
             )
             return int(cursor.lastrowid)
 
+    def update_product_readiness_snapshot(
+        self,
+        product_id: int,
+        readiness_percent: int,
+    ) -> None:
+        """Update only the rebuildable production compatibility snapshot."""
+
+        if isinstance(readiness_percent, bool) or not 0 <= readiness_percent <= 100:
+            raise ValueError("Готовность изделия должна находиться в диапазоне 0..100")
+        with self.database.connect() as connection:
+            cursor = connection.execute(
+                f"""
+                UPDATE {PRODUCTS_TABLE}
+                SET readiness_percent = ?
+                WHERE id = ?
+                """,
+                (readiness_percent, product_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Изделие не найдено")
+
     def set_product_active(self, product_id: int, is_active: bool) -> None:
         with self.database.connect() as connection:
             connection.execute(

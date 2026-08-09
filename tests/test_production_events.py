@@ -663,7 +663,7 @@ def test_unexplained_observation_decrease_is_not_confirmed(context: EventContext
     assert context.service.get_event(lower.id).status is ProductionEventStatus.READY
 
 
-def test_product_legacy_readiness_is_not_changed_by_confirmation(context: EventContext) -> None:
+def test_product_readiness_snapshot_is_synced_after_confirmation(context: EventContext) -> None:
     before = context.directories.get_product(context.product_id)
     assert before is not None
 
@@ -671,7 +671,8 @@ def test_product_legacy_readiness_is_not_changed_by_confirmation(context: EventC
 
     after = context.directories.get_product(context.product_id)
     assert after is not None
-    assert after.readiness_percent == before.readiness_percent == 17
+    assert before.readiness_percent == 17
+    assert after.readiness_percent == 88
 
 
 def test_multiple_attachments_preserve_order_and_do_not_change_files(

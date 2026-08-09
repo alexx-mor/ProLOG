@@ -85,7 +85,7 @@ class ProductionEventRepository:
 
     def list_by_product(self, product_id: int) -> list[ProductionEvent]:
         return self._list(
-            "WHERE product_id = ? ORDER BY observed_at_utc, id",
+            "WHERE product_id = ? ORDER BY observed_at_utc, recorded_at_utc, id",
             (product_id,),
         )
 
@@ -93,10 +93,41 @@ class ProductionEventRepository:
         return self._list(
             """
             WHERE product_id = ? AND status = 'confirmed'
-            ORDER BY observed_at_utc, id
+            ORDER BY observed_at_utc, recorded_at_utc, id
             """,
             (product_id,),
         )
+
+    def list_timeline_by_product(
+        self,
+        product_id: int,
+        *,
+        include_audit: bool = False,
+    ) -> list[ProductionEvent]:
+        statuses = (
+            "('draft', 'ready', 'confirmed', 'rejected', 'superseded')"
+            if include_audit
+            else "('confirmed', 'superseded')"
+        )
+        return self._list(
+            f"""
+            WHERE product_id = ? AND status IN {statuses}
+            ORDER BY observed_at_utc, recorded_at_utc, id
+            """,
+            (product_id,),
+        )
+
+    def list_referenced_product_ids(self) -> list[int]:
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT product_id
+                FROM ProductionEvents
+                WHERE product_id IS NOT NULL
+                ORDER BY product_id
+                """
+            ).fetchall()
+        return [int(row["product_id"]) for row in rows]
 
     def mark_ready(self, event_id: int) -> ProductionEvent:
         self._update_status(event_id, ProductionEventStatus.DRAFT, ProductionEventStatus.READY)
@@ -343,6 +374,41 @@ class ProductionEventRepository:
                 LIMIT 1
                 """,
                 (product_id,),
+            ).fetchone()
+        return int(row["readiness_percent"]) if row else None
+
+    def previous_effective_readiness(self, event: ProductionEvent) -> int | None:
+        """Return readiness immediately preceding an event in production time."""
+
+        event_id = event.id or 0
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT readiness_percent
+                FROM ProductionEvents
+                WHERE product_id = ? AND status = 'confirmed'
+                  AND readiness_percent IS NOT NULL
+                  AND (
+                    observed_at_utc < ?
+                    OR (
+                        observed_at_utc = ? AND recorded_at_utc < ?
+                    )
+                    OR (
+                        observed_at_utc = ? AND recorded_at_utc = ? AND id < ?
+                    )
+                  )
+                ORDER BY observed_at_utc DESC, recorded_at_utc DESC, id DESC
+                LIMIT 1
+                """,
+                (
+                    event.product_id,
+                    event.observed_at_utc.isoformat(),
+                    event.observed_at_utc.isoformat(),
+                    event.recorded_at_utc.isoformat(),
+                    event.observed_at_utc.isoformat(),
+                    event.recorded_at_utc.isoformat(),
+                    event_id,
+                ),
             ).fetchone()
         return int(row["readiness_percent"]) if row else None
 
