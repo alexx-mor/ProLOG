@@ -1,5 +1,55 @@
 ﻿# Changelog
 
+## 2026-08-09 - Production event persistence (P4)
+
+### Added
+
+- Added core schema migration `4` with `ProductionEvents`,
+  `ProductionEventAttachments` and `ProductionEventWorkLogs`.
+- Added dedicated `ProductionEventRepository` and `ProductionService` without
+  UI, WorkBot, MAX or filesystem dependencies.
+- Added explicit lifecycle transitions, transactional confirmation,
+  rejection, correction/supersede chains and immutable confirmed facts.
+- Added lossless ActorRef snapshots for creation, confirmation, rejection and
+  explicit WorkLog relations without treating Actor as Employee.
+- Added ordered many-to-many Attachment relations and auditable explicit/manual
+  WorkLog relations.
+- Added product object snapshots at confirmation and readiness-decrease rules
+  for correction, rework and explained observations.
+- Extended cross-database diagnostics for Product, Object and Employee event
+  references plus internal stage, correction, Attachment and WorkLog links.
+
+### Architecture
+
+- `ProductionEvent` and `WorkLogEntry` remain independent typed facts.
+- Confirmed business fields are protected by SQLite triggers; confirmed facts
+  cannot be physically deleted through the persistence contract.
+- Confirming a correction and superseding its source happen in one SQLite
+  transaction. A correction draft leaves its source confirmed.
+- `idempotency_key` is unique when nonempty. Equal payload retries return the
+  existing result; conflicting payloads raise an explicit domain error.
+- `source_ref` is intentionally not globally unique.
+- WorkLog deletion cascades only to the relation row. No cascade deletes an
+  Attachment, physical file, WorkLog or ProductionEvent primary fact.
+- No Product status/readiness projection, baseline generation, production UI,
+  MAX media, inbox, parser, AI or production analytics was added.
+- Only core advances to schema version `4`; component DB and WorkBot remain at
+  version `1`. Application and packaged Windows version advance to `0.5.11`.
+
+### Verified
+
+- All project tests pass: `155 passed`.
+- P4 tests cover migration/retry/rollback, schema/FK policy, lifecycle,
+  immutable triggers, correction chains and atomic failure rollback,
+  readiness/rework, Attachment and WorkLog relations, Actor round trips,
+  idempotency and architecture boundaries.
+- Working databases were backed up to `backups/pre-p4-20260809-192030`.
+- Dry-run completed at `backups/p4-dry-run-20260809-192108` with full create,
+  attach, link, confirm, correct, supersede and rollback scenarios.
+- Working core migrated to schema v4 with all three new tables empty. Legacy
+  rows stayed equal, component DB and WorkBot stayed byte-identical, and all
+  integrity/reference/attachment diagnostics passed.
+
 ## 2026-08-09 - Production attachment storage (P3)
 
 ### Added

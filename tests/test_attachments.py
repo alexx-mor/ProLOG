@@ -61,9 +61,12 @@ def _service(database: Database, root: Path) -> AttachmentService:
 
 def _downgrade_core_to_v2(database: Database) -> None:
     with database.connect() as connection:
+        connection.execute("DROP TABLE ProductionEventAttachments")
+        connection.execute("DROP TABLE ProductionEventWorkLogs")
+        connection.execute("DROP TABLE ProductionEvents")
         connection.execute("DROP TABLE Attachments")
         connection.execute(
-            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version = 3"
+            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version >= 3"
         )
 
 
@@ -80,7 +83,7 @@ def test_migration_v2_to_v3_has_exact_attachment_schema(tmp_path: Path) -> None:
 
     versions = {item.component: item.current_version for item in database.schema_versions()}
     assert versions == {
-        "prolog": 3,
+        "prolog": 4,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -443,7 +446,7 @@ def test_database_failure_after_file_write_is_detected_as_orphan(tmp_path: Path)
     database.initialize()
     root = tmp_path / "attachments"
     service = _service(database, root)
-    with database.connect() as connection:
+    with database.connect(foreign_keys=False) as connection:
         connection.execute("DROP TABLE Attachments")
 
     with pytest.raises(sqlite3.OperationalError):

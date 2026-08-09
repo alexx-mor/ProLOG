@@ -50,7 +50,11 @@ from models import (
     WorkDayType,
     WorkLogEntry,
 )
-from production.migrations import apply_attachments_migration, apply_production_stages_migration
+from production.migrations import (
+    apply_attachments_migration,
+    apply_production_events_migration,
+    apply_production_stages_migration,
+)
 from schema_migrations import (
     Migration,
     MigrationComponent,
@@ -83,7 +87,7 @@ ALIAS_DEFINITIONS = {
     "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
 }
 
-PROLOG_SCHEMA_VERSION = 3
+PROLOG_SCHEMA_VERSION = 4
 PROLOG_SCHEMA_COMPONENTS = (
     MigrationComponent("prolog", "main"),
     MigrationComponent("employees", "employees_db"),
@@ -191,10 +195,16 @@ class Database:
                     apply=self._apply_production_stages_migration,
                 ),
                 Migration(
-                    version=PROLOG_SCHEMA_VERSION,
+                    version=3,
                     name="Attachment metadata storage",
                     fingerprint="prolog-attachment-metadata-v3",
                     apply=self._apply_attachments_migration,
+                ),
+                Migration(
+                    version=PROLOG_SCHEMA_VERSION,
+                    name="Production event persistence",
+                    fingerprint="prolog-production-events-v4",
+                    apply=self._apply_production_events_migration,
                 ),
             ),
             app_version=APP_VERSION,
@@ -239,6 +249,12 @@ class Database:
         connection: sqlite3.Connection,
     ) -> None:
         apply_attachments_migration(connection)
+
+    def _apply_production_events_migration(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        apply_production_events_migration(connection)
 
     def _apply_baseline_migration(self, connection: sqlite3.Connection) -> None:
         execute_sql_script(connection, COMPONENT_SCHEMA_SQL)
@@ -1078,6 +1094,19 @@ class DirectoryRepository:
         with self.database.connect() as connection:
             return [_map_product(row) for row in connection.execute(sql)]
 
+    def get_product(self, product_id: int) -> ProductItem | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT p.*, o.name AS object_name
+                FROM {PRODUCTS_TABLE} p
+                JOIN {OBJECTS_TABLE} o ON o.id = p.object_id
+                WHERE p.id = ?
+                """,
+                (product_id,),
+            ).fetchone()
+        return _map_product(row) if row else None
+
     def save_product(self, product: ProductItem) -> int:
         if product.object_id is None:
             raise ValueError("Выберите объект для изделия")
@@ -1170,6 +1199,14 @@ class DirectoryRepository:
 
     def delete_product(self, product_id: int) -> None:
         with self.database.connect() as connection:
+            production_event = connection.execute(
+                "SELECT 1 FROM ProductionEvents WHERE product_id = ? LIMIT 1",
+                (product_id,),
+            ).fetchone()
+            if production_event is not None:
+                raise ValueError(
+                    "Нельзя удалить изделие: оно используется в истории производства"
+                )
             used = connection.execute(
                 "SELECT COUNT(*) AS count FROM WorkLogEntries WHERE product_id = ?",
                 (product_id,),
@@ -1376,6 +1413,17 @@ class DirectoryRepository:
                     if int(used["count"] or 0):
                         raise ValueError("Нельзя удалить группу: она используется в справочнике должностей")
                 if table_key == "objects":
+                    production_event = connection.execute(
+                        """
+                        SELECT 1 FROM ProductionEvents
+                        WHERE object_id_snapshot = ? LIMIT 1
+                        """,
+                        (item_id,),
+                    ).fetchone()
+                    if production_event is not None:
+                        raise ValueError(
+                            "Нельзя удалить объект: он сохранен в истории производства"
+                        )
                     products = connection.execute(
                         f"SELECT COUNT(*) AS count FROM {PRODUCTS_TABLE} WHERE object_id = ?",
                         (item_id,),
@@ -1564,6 +1612,17 @@ class EmployeeRepository:
 
     def delete(self, employee_id: int) -> None:
         with self.database.connect() as connection:
+            production_event = connection.execute(
+                """
+                SELECT 1 FROM ProductionEvents
+                WHERE reported_by_employee_id = ? LIMIT 1
+                """,
+                (employee_id,),
+            ).fetchone()
+            if production_event is not None:
+                raise ValueError(
+                    "Нельзя удалить сотрудника: он указан в истории производства"
+                )
             row = connection.execute(
                 "SELECT COUNT(*) AS count FROM WorkLogEntries WHERE employee_id = ?",
                 (employee_id,),

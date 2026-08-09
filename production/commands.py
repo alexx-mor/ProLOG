@@ -28,6 +28,7 @@ class CreateProductionEvent:
     description: str = ""
     source_ref: str | None = None
     reported_by_employee_id: int | None = None
+    change_reason: str = ""
     idempotency_key: str | None = None
 
     def __post_init__(self) -> None:

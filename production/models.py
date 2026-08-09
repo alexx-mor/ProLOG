@@ -73,6 +73,14 @@ class ProductionInboxStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class WorkLogRelationType(StrEnum):
+    """Persisted meanings of an explicit event-to-work-log relation."""
+
+    EXPLICIT = "explicit"
+    MANUAL = "manual"
+    SAME_PRODUCT_PERIOD = "same_product_period"
+
+
 def _require_enum(value: object, enum_type: type[StrEnum], field_name: str) -> None:
     if not isinstance(value, enum_type):
         raise InvalidLifecycleStateError(
@@ -169,11 +177,17 @@ class ProductionEvent:
     readiness_percent: int | None = None
     description: str = ""
     recorded_at_utc: datetime = field(default_factory=utc_now)
+    created_at_utc: datetime = field(default_factory=utc_now)
     source_ref: str | None = None
     reported_by_employee_id: int | None = None
     status: ProductionEventStatus = ProductionEventStatus.DRAFT
     supersedes_event_id: int | None = None
     confirmed_by: ActorRef | None = None
+    confirmed_at_utc: datetime | None = None
+    rejected_by: ActorRef | None = None
+    rejected_at_utc: datetime | None = None
+    rejection_reason: str = ""
+    change_reason: str = ""
     idempotency_key: str | None = None
     id: int | None = None
     uid: UUID = field(default_factory=uuid4)
@@ -185,7 +199,15 @@ class ProductionEvent:
         validate_readiness(self.readiness_percent)
         require_utc_datetime(self.observed_at_utc, "observed_at_utc")
         require_utc_datetime(self.recorded_at_utc, "recorded_at_utc")
-        if self.status is ProductionEventStatus.CONFIRMED:
+        require_utc_datetime(self.created_at_utc, "created_at_utc")
+        if self.confirmed_at_utc is not None:
+            require_utc_datetime(self.confirmed_at_utc, "confirmed_at_utc")
+        if self.rejected_at_utc is not None:
+            require_utc_datetime(self.rejected_at_utc, "rejected_at_utc")
+        if self.status in {
+            ProductionEventStatus.CONFIRMED,
+            ProductionEventStatus.SUPERSEDED,
+        }:
             if self.product_id is None:
                 raise ProductRequiredForConfirmationError(
                     "A confirmed ProductionEvent requires product_id"
@@ -198,6 +220,17 @@ class ProductionEvent:
             raise InvalidLifecycleStateError(
                 "confirmed_by is only valid for a confirmed ProductionEvent"
             )
+        if self.status is ProductionEventStatus.REJECTED:
+            if self.rejected_by is None or self.rejected_at_utc is None:
+                raise InvalidLifecycleStateError(
+                    "A rejected ProductionEvent requires rejected ActorRef and timestamp"
+                )
+        elif self.rejected_by is not None or self.rejected_at_utc is not None:
+            raise InvalidLifecycleStateError(
+                "rejection audit is only valid for a rejected ProductionEvent"
+            )
+        if self.idempotency_key is not None and not self.idempotency_key.strip():
+            raise InvalidLifecycleStateError("idempotency_key must not be blank")
         if (
             self.event_type is ProductionEventType.CORRECTION
             and self.supersedes_event_id is None
@@ -205,6 +238,34 @@ class ProductionEvent:
             raise CorrectionSourceRequiredError(
                 "A correction ProductionEvent requires supersedes_event_id"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionEventAttachment:
+    production_event_id: int
+    attachment_id: int
+    sort_order: int
+
+    def __post_init__(self) -> None:
+        if self.production_event_id <= 0 or self.attachment_id <= 0:
+            raise InvalidLifecycleStateError("Relation identifiers must be positive")
+        if self.sort_order < 0:
+            raise InvalidLifecycleStateError("Attachment sort_order must not be negative")
+
+
+@dataclass(frozen=True, slots=True)
+class ProductionEventWorkLog:
+    production_event_id: int
+    worklog_entry_id: int
+    relation_type: WorkLogRelationType
+    created_at_utc: datetime
+    created_by: ActorRef
+
+    def __post_init__(self) -> None:
+        if self.production_event_id <= 0 or self.worklog_entry_id <= 0:
+            raise InvalidLifecycleStateError("Relation identifiers must be positive")
+        _require_enum(self.relation_type, WorkLogRelationType, "relation_type")
+        require_utc_datetime(self.created_at_utc, "created_at_utc")
 
 
 @dataclass(frozen=True, slots=True)

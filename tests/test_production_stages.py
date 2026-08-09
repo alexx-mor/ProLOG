@@ -34,6 +34,9 @@ def _service(database: Database) -> ProductionStageService:
 
 def _downgrade_core_to_v1(database: Database) -> None:
     with database.connect() as connection:
+        connection.execute("DROP TABLE ProductionEventAttachments")
+        connection.execute("DROP TABLE ProductionEventWorkLogs")
+        connection.execute("DROP TABLE ProductionEvents")
         connection.execute("DROP TABLE Attachments")
         connection.execute("DROP TABLE ProductionStages")
         connection.execute(
@@ -58,7 +61,7 @@ def test_migration_from_v1_preserves_existing_core_data(tmp_path: Path) -> None:
 
     versions = {item.component: item.current_version for item in database.schema_versions()}
     assert versions == {
-        "prolog": 3,
+        "prolog": 4,
         "employees": 1,
         "objects": 1,
         "products": 1,

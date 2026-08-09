@@ -17,12 +17,12 @@ VSVersionInfo(
         [
           StringStruct('CompanyName', 'Морарь Александр Александрович'),
           StringStruct('FileDescription', 'ProLOG - журнал производственных работ'),
-          StringStruct('FileVersion', '0.5.10'),
+          StringStruct('FileVersion', '0.5.11'),
           StringStruct('InternalName', 'ProLOG'),
           StringStruct('LegalCopyright', '© Морарь Александр Александрович. Все права защищены.'),
           StringStruct('OriginalFilename', 'ProLOG.exe'),
           StringStruct('ProductName', 'ProLOG'),
-          StringStruct('ProductVersion', '0.5.10')
+          StringStruct('ProductVersion', '0.5.11')
         ]
       )
     ]),

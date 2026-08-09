@@ -22,6 +22,8 @@ a = Analysis(
         "production.attachment_store",
         "production.attachment_types",
         "production.local_attachment_store",
+        "production.event_repository",
+        "production.event_service",
     ],
     hookspath=[],
     hooksconfig={},

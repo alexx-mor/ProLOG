@@ -73,3 +73,35 @@ class AttachmentSourceExistsError(ProductionDomainError):
 
 class AttachmentNotFoundError(ProductionDomainError):
     """Raised when attachment metadata or physical content is missing."""
+
+
+class ProductionEventNotFoundError(ProductionDomainError):
+    """Raised when a requested production event does not exist."""
+
+
+class InvalidProductionTransitionError(ProductionDomainError):
+    """Raised when a production-event lifecycle transition is forbidden."""
+
+
+class ProductionReferenceNotFoundError(ProductionDomainError):
+    """Raised when an event references a missing product, employee or relation."""
+
+
+class ProductionEventImmutableError(ProductionDomainError):
+    """Raised when confirmed production history is changed in place."""
+
+
+class ProductionEventIdempotencyConflictError(ProductionDomainError):
+    """Raised when one idempotency key is reused for another event payload."""
+
+
+class InvalidProductionCorrectionError(ProductionDomainError):
+    """Raised when a correction cannot safely supersede its source event."""
+
+
+class UnexplainedReadinessDecreaseError(ProductionDomainError):
+    """Raised when an observation lowers readiness without an auditable reason."""
+
+
+class ObjectSnapshotManagedError(ProductionDomainError):
+    """Raised when application code attempts to assign a historical snapshot."""

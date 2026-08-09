@@ -1,8 +1,9 @@
 # План реализации production-модуля ProLOG
 
-Статус: P0, P1, P2 и P3 завершены; ProductionEvent еще не реализован
+Статус: P0, P1, P2, P3 и P4 завершены; production UI еще не реализован
 Основание: `ARCHITECTURE_PROPOSAL.md` и ADR-001..ADR-006  
-Версия ProLOG на момент планирования: 0.5.8
+Версия ProLOG на момент первоначального планирования: 0.5.8
+Текущая реализованная версия: 0.5.11
 
 ## 1. Границы плана
 
@@ -184,6 +185,8 @@ production-событий и без WorkBot.
 
 ## 7. Этап P4 — хранилище ProductionEvent
 
+Статус: завершен 09.08.2026.
+
 ### Миграция
 
 Добавить:
@@ -209,7 +212,7 @@ production-событий и без WorkBot.
 ### Тесты
 
 - создание, подтверждение, отклонение и корректировка;
-- идемпотентный `source_ref`;
+- идемпотентный `idempotency_key`, при этом `source_ref` не уникален;
 - запрет отсутствующего изделия;
 - связи с несколькими фотографиями;
 - необязательная многие-ко-многим связь с WorkLog;
@@ -218,6 +221,28 @@ production-событий и без WorkBot.
 ### Критерий готовности
 
 ProductionEvent полностью работает через сервис и репозиторий без UI и MAX.
+
+Результат:
+
+- core schema v4 содержит `ProductionEvents`, `ProductionEventAttachments` и
+  `ProductionEventWorkLogs` с реальными FK внутри core;
+- отдельные `ProductionEventRepository` и `ProductionService` реализуют
+  создание, ready, confirmation, rejection, correction и явные связи;
+- Actor сохраняется lossless snapshot полей ActorRef без подмены Employee;
+- подтвержденные бизнес-поля и lifecycle дополнительно защищены SQLite-
+  триггерами;
+- correction подтверждается атомарно с переводом оригинала в `superseded`;
+- readiness допускает correction/rework и требует сохраняемую причину для
+  необъяснимого снижения observation;
+- `object_id_snapshot` автоматически фиксируется из Product при confirmation;
+- idempotency key различает безопасный повтор и конфликт payload;
+- cross-database diagnostics проверяет Product, Object и Employee, а также
+  внутренние production-связи;
+- WorkLog deletion удаляет только relation row и не удаляет primary facts;
+- Product legacy status/readiness, WorkBot, UI и physical attachments не
+  изменяются;
+- lifecycle и persistence описаны в `docs/PRODUCTION_EVENTS.md`;
+- приложение и Windows EXE обновляются до версии 0.5.11.
 
 ## 8. Этап P5 — текущая проекция изделия
 

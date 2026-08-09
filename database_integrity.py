@@ -36,7 +36,7 @@ class CrossDatabaseIntegrityError(RuntimeError):
 def check_cross_database_references(
     connection: sqlite3.Connection,
 ) -> DatabaseIntegrityReport:
-    checks = (
+    checks = [
         (
             "worklog_employee",
             "Записи работ ссылаются на отсутствующих сотрудников",
@@ -187,7 +187,116 @@ def check_cross_database_references(
             WHERE w.id IS NULL
             """,
         ),
-    )
+    ]
+    production_events_exist = connection.execute(
+        """
+        SELECT 1 FROM sqlite_master
+        WHERE type = 'table' AND name = 'ProductionEvents'
+        """
+    ).fetchone()
+    if production_events_exist is not None:
+        checks.extend(
+            (
+                (
+                    "production_event_product",
+                    "Производственные события ссылаются на отсутствующие изделия",
+                    """
+                    SELECT event.id
+                    FROM ProductionEvents event
+                    LEFT JOIN products_db.Products product ON product.id = event.product_id
+                    WHERE event.product_id IS NOT NULL AND product.id IS NULL
+                    """,
+                ),
+                (
+                    "production_event_object_snapshot",
+                    "Снимки производственных событий ссылаются на отсутствующие объекты",
+                    """
+                    SELECT event.id
+                    FROM ProductionEvents event
+                    LEFT JOIN objects_db.Objects object
+                        ON object.id = event.object_id_snapshot
+                    WHERE event.object_id_snapshot IS NOT NULL AND object.id IS NULL
+                    """,
+                ),
+                (
+                    "production_event_employee",
+                    "Производственные события ссылаются на отсутствующих сотрудников",
+                    """
+                    SELECT event.id
+                    FROM ProductionEvents event
+                    LEFT JOIN employees_db.Employees employee
+                        ON employee.id = event.reported_by_employee_id
+                    WHERE event.reported_by_employee_id IS NOT NULL
+                      AND employee.id IS NULL
+                    """,
+                ),
+                (
+                    "production_event_stage",
+                    "Производственные события ссылаются на отсутствующие этапы",
+                    """
+                    SELECT event.id
+                    FROM ProductionEvents event
+                    LEFT JOIN ProductionStages stage ON stage.id = event.stage_id
+                    WHERE event.stage_id IS NOT NULL AND stage.id IS NULL
+                    """,
+                ),
+                (
+                    "production_event_supersedes",
+                    "Корректировки ссылаются на отсутствующие исходные события",
+                    """
+                    SELECT event.id
+                    FROM ProductionEvents event
+                    LEFT JOIN ProductionEvents source
+                        ON source.id = event.supersedes_event_id
+                    WHERE event.supersedes_event_id IS NOT NULL AND source.id IS NULL
+                    """,
+                ),
+                (
+                    "production_attachment_event",
+                    "Связи Attachment ссылаются на отсутствующие production event",
+                    """
+                    SELECT relation.production_event_id
+                    FROM ProductionEventAttachments relation
+                    LEFT JOIN ProductionEvents event
+                        ON event.id = relation.production_event_id
+                    WHERE event.id IS NULL
+                    """,
+                ),
+                (
+                    "production_event_attachment",
+                    "Связи production event ссылаются на отсутствующие Attachment",
+                    """
+                    SELECT relation.production_event_id
+                    FROM ProductionEventAttachments relation
+                    LEFT JOIN Attachments attachment
+                        ON attachment.id = relation.attachment_id
+                    WHERE attachment.id IS NULL
+                    """,
+                ),
+                (
+                    "production_worklog_event",
+                    "Связи WorkLog ссылаются на отсутствующие production event",
+                    """
+                    SELECT relation.production_event_id
+                    FROM ProductionEventWorkLogs relation
+                    LEFT JOIN ProductionEvents event
+                        ON event.id = relation.production_event_id
+                    WHERE event.id IS NULL
+                    """,
+                ),
+                (
+                    "production_event_worklog",
+                    "Связи production event ссылаются на отсутствующие записи работ",
+                    """
+                    SELECT relation.production_event_id
+                    FROM ProductionEventWorkLogs relation
+                    LEFT JOIN WorkLogEntries worklog
+                        ON worklog.id = relation.worklog_entry_id
+                    WHERE worklog.id IS NULL
+                    """,
+                ),
+            )
+        )
     issues: list[ReferenceIntegrityIssue] = []
     for code, message, query in checks:
         rows = connection.execute(query).fetchall()
