@@ -24,6 +24,9 @@ def run_polling(config: WorkBotConfig) -> None:
 
     saved_marker = storage.get_state("updates_marker")
     marker = int(saved_marker) if saved_marker else None
+    retried = service.retry_source_media()
+    if retried:
+        logger.info("Повторена загрузка незавершенных WorkBot media: %s", retried)
     backoff = 1
     while True:
         try:
@@ -33,6 +36,7 @@ def run_polling(config: WorkBotConfig) -> None:
                     service.handle_update(update)
                 except Exception:
                     logger.exception("Не удалось обработать обновление MAX")
+            service.retry_source_media()
             new_marker = payload.get("marker")
             if new_marker is not None:
                 marker = int(new_marker)

@@ -16,6 +16,10 @@ Excel-книгу с отдельным листом для каждого сот
 ## Текущие возможности
 
 - Получение новых и изменённых сообщений через Long Polling MAX.
+- Сохранение photo-only сообщений до запуска текстового parser.
+- Неизменяемая история редакций текста, подписи и состава вложений.
+- Сохранение порядка source media и оригинальных bytes в отдельном CAS root.
+- Ограниченный retry загрузки и диагностика повреждений/пропусков.
 - Работа в разрешённых группах MAX.
 - Сохранение исходного текста, автора, времени и идентификатора сообщения.
 - Защита от повторной обработки одного сообщения.
@@ -66,6 +70,7 @@ WORKBOT_OWNER_IDS=
 WORKBOT_ALLOWED_CHAT_IDS=
 WORKBOT_DENY_UNAUTHORIZED=false
 WORKBOT_DATABASE=data/workbot.sqlite3
+WORKBOT_MEDIA_ROOT=data/workbot_media
 WORKBOT_EXPORT_DIR=exports
 WORKBOT_POLL_TIMEOUT=30
 ```
@@ -159,9 +164,12 @@ WorkBot хранит:
 - статус и ошибку разбора;
 - структурированные отчёты;
 - позицию Long Polling.
+- исходные ревизии MAX и упорядоченные metadata вложений;
+- оригинальные media в отдельном `WORKBOT_MEDIA_ROOT`.
 
-Перед повторной обработкой истории или изменением правил парсинга следует
-создать копию `data/workbot.sqlite3`. Excel-файлы создаются в `exports/`.
+Полная резервная копия WorkBot после schema 2 состоит из
+`data/workbot.sqlite3` и всего `WORKBOT_MEDIA_ROOT`. Копии одной SQLite уже
+недостаточно. Excel-файлы создаются в `exports/`.
 
 ## Проверка
 
@@ -176,3 +184,4 @@ python -m compileall workbot
 - [Принцип работы и архитектура](docs/PRINCIPLES.md)
 - [План интеграции с ProLOG](docs/PROLOG_INTEGRATION.md)
 - [Краткая передача контекста разработчику ProLOG](docs/HANDOFF_TO_PROLOG.md)
+- [Source revisions и media archive](../docs/WORKBOT_MEDIA_SOURCE.md)

@@ -428,7 +428,7 @@ def test_write_failure_does_not_commit_metadata(tmp_path: Path, monkeypatch) -> 
         raise OSError("artificial write failure")
 
     monkeypatch.setattr(
-        "production.local_attachment_store.tempfile.NamedTemporaryFile",
+        "infrastructure.content_store.tempfile.NamedTemporaryFile",
         fail_temp_file,
     )
     with pytest.raises(AttachmentRootUnavailableError):

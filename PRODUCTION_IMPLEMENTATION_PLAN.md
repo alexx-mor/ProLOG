@@ -1,9 +1,9 @@
 # План реализации production-модуля ProLOG
 
-Статус: P0-P6 и эксплуатационный этап P6.1 завершены
+Статус: P0-P7 и эксплуатационный этап P6.1 завершены
 Основание: `ARCHITECTURE_PROPOSAL.md` и ADR-001..ADR-006  
 Версия ProLOG на момент первоначального планирования: 0.5.8
-Текущая реализованная версия: 0.6.1
+Текущая реализованная версия: 0.6.2
 
 ## 1. Границы плана
 
@@ -362,6 +362,8 @@ production-функция.
 
 ## 10. Этап P7 — сохранение медиа в WorkBot
 
+Статус: завершен 10.08.2026. Версия ProLOG 0.6.2, WorkBot schema 2.
+
 ### Миграция WorkBot
 
 Добавить:
@@ -392,6 +394,17 @@ production-функция.
 
 WorkBot воспроизводит все исходные медиа и ревизии, но еще не группирует их в
 производственные пакеты.
+
+Результат:
+
+- source envelope сохраняется до проверки текста и запуска parser;
+- добавлены immutable revisions, ordered media metadata и реальные tombstones;
+- WorkBot source media использует отдельный configurable CAS root;
+- download имеет состояния, ограниченный retry/backoff и restart recovery;
+- diagnostics обнаруживает повреждения, пропуски, orphan/temp и stale jobs;
+- legacy parser и WorkBotImportRows не изменены;
+- production domain, schema и UI не изменены;
+- автоматический historical media backfill не выполняется.
 
 ## 11. Этап P8 — транспорт WorkBot → production inbox
 

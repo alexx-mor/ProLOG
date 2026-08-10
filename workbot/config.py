@@ -49,8 +49,11 @@ class WorkBotConfig:
     deny_unauthorized: bool = False
     api_base: str = "https://platform-api2.max.ru"
     database_path: Path = PROJECT_DIR / "data" / "workbot.sqlite3"
+    media_root: Path = PROJECT_DIR / "data" / "workbot_media"
     export_dir: Path = PROJECT_DIR / "exports"
     poll_timeout: int = 30
+    media_max_attempts: int = 4
+    media_retry_base_seconds: int = 5
 
     @classmethod
     def from_environment(cls, *, require_token: bool = True, require_owner: bool = True) -> "WorkBotConfig":
@@ -64,8 +67,19 @@ class WorkBotConfig:
             database_path=Path(
                 os.getenv("WORKBOT_DATABASE", str(PROJECT_DIR / "data" / "workbot.sqlite3"))
             ).expanduser(),
+            media_root=Path(
+                os.getenv("WORKBOT_MEDIA_ROOT", str(PROJECT_DIR / "data" / "workbot_media"))
+            ).expanduser(),
             export_dir=Path(os.getenv("WORKBOT_EXPORT_DIR", str(PROJECT_DIR / "exports"))).expanduser(),
             poll_timeout=max(1, min(90, int(os.getenv("WORKBOT_POLL_TIMEOUT", "30")))),
+            media_max_attempts=max(
+                1,
+                min(10, int(os.getenv("WORKBOT_MEDIA_MAX_ATTEMPTS", "4"))),
+            ),
+            media_retry_base_seconds=max(
+                1,
+                min(300, int(os.getenv("WORKBOT_MEDIA_RETRY_BASE_SECONDS", "5"))),
+            ),
         )
         if require_token and not config.token:
             raise ValueError(

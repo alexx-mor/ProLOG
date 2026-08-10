@@ -18,9 +18,10 @@ from schema_migrations import (
     execute_sql_script,
 )
 from workbot.models import ParsedEmployeeReport, ParsedReport, StoredReport
+from workbot.migrations import apply_workbot_source_media_migration
 
 
-WORKBOT_SCHEMA_VERSION = 1
+WORKBOT_SCHEMA_VERSION = 2
 WORKBOT_SCHEMA_COMPONENT = MigrationComponent("workbot", "main")
 logger = logging.getLogger(__name__)
 
@@ -65,10 +66,16 @@ class WorkBotStorage:
             (WORKBOT_SCHEMA_COMPONENT,),
             (
                 Migration(
-                    version=WORKBOT_SCHEMA_VERSION,
+                    version=1,
                     name="WorkBot 0.5.8 baseline",
                     fingerprint="workbot-schema-baseline-0.5.8-v1",
                     apply=self._apply_baseline_migration,
+                ),
+                Migration(
+                    version=WORKBOT_SCHEMA_VERSION,
+                    name="MAX source revisions and media archive",
+                    fingerprint="workbot-source-revisions-media-v2",
+                    apply=apply_workbot_source_media_migration,
                 ),
             ),
             app_version=APP_VERSION,

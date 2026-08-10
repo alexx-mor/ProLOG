@@ -1,5 +1,46 @@
 ﻿# Changelog
 
+## 2026-08-10 - MAX source revisions and WorkBot media archive (P7)
+
+### Added
+
+- Added immutable MAX source messages, revisions, ordered attachment metadata
+  and real `message_removed` tombstones in WorkBot schema 2.
+- Added photo-only and multi-media intake before all text/parser filters.
+- Added a separate configurable `data/workbot_media/` content-addressed root,
+  SHA-256 deduplication, atomic writes and path traversal protection.
+- Added bounded media download retry/backoff, restart recovery and structured
+  source-media diagnostics.
+
+### Architecture
+
+- Shared filesystem mechanics now live in a domain-neutral infrastructure
+  module used by both WorkBot media and production Attachment storage.
+- WorkBot source media remains distinct from Production Attachment and never
+  creates Product, ProductionStage, ProductionEvent or WorkBotImportRows.
+- Legacy text parsing runs only after source archival and retains its existing
+  results. Explicit historical backfill does not start media backfill.
+- Core remains schema `4`; employees/objects/products/aliases remain `1`;
+  only WorkBot advances from schema `1` to `2`.
+- Application version advances from `0.6.1` to `0.6.2`.
+
+### Verified
+
+- Added 20 P7 source/migration/media/recovery scenarios; the complete suite
+  passes with `218 passed`.
+- Before deployment, the stopped WorkBot database and media root were backed
+  up to `backups/pre-p7-20260810-132242`; SQLite integrity was `ok`.
+- The copied-data production-group scenario at
+  `backups/p7-dry-run-20260810-132329` preserved 8 messages, 9 revisions,
+  7 revision attachment rows and 6 deduplicated original files without any
+  grouping, Product matching or ProductionEvent creation.
+- The working WorkBot migration created empty source tables at schema `2`.
+  Legacy WorkBot table signatures, 3,911 `WorkBotImportRows` and existing
+  production table signatures were unchanged immediately after migration.
+- Staged and deployed Windows executables passed eight-second smoke tests and
+  report file/product version `0.6.2`. MAX API connectivity passed and one
+  WorkBot polling process was restarted successfully on schema `2`.
+
 ## 2026-08-09 - Production operations and photo export (P6.1)
 
 ### Added

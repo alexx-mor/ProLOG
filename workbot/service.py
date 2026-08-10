@@ -12,6 +12,9 @@ from workbot.config import WorkBotConfig
 from workbot.excel import export_reports
 from workbot.legacy_parser import parse_legacy_reports
 from workbot.parser import ReportParseError, parse_report
+from workbot.media_store import WorkBotMediaStore
+from workbot.source_repository import WorkBotSourceRepository
+from workbot.source_service import WorkBotSourceService
 from workbot.storage import WorkBotStorage
 
 
@@ -22,15 +25,38 @@ class BotClient(Protocol):
 
 
 class WorkBotService:
-    def __init__(self, config: WorkBotConfig, storage: WorkBotStorage, client: BotClient) -> None:
+    def __init__(
+        self,
+        config: WorkBotConfig,
+        storage: WorkBotStorage,
+        client: BotClient,
+        source_service: WorkBotSourceService | None = None,
+    ) -> None:
         self.config = config
         self.storage = storage
         self.client = client
+        self.source = source_service or WorkBotSourceService(
+            WorkBotSourceRepository(storage),
+            WorkBotMediaStore(config.media_root),
+            client,
+            max_download_attempts=config.media_max_attempts,
+            retry_base_seconds=config.media_retry_base_seconds,
+        )
 
     def handle_update(self, update: dict[str, Any], *, historical: bool = False) -> None:
         update_type = str(update.get("update_type") or "")
         if update_type == "message_callback":
             self._handle_callback(update)
+            return
+        if update_type == "message_removed":
+            removed_chat_id = _as_int(update.get("chat_id"))
+            if (
+                removed_chat_id is not None
+                and self.config.allowed_chat_ids
+                and removed_chat_id not in self.config.allowed_chat_ids
+            ):
+                return
+            self.source.archive_update(update)
             return
         if update_type not in {"message_created", "message_edited"}:
             return
@@ -58,6 +84,16 @@ class WorkBotService:
         chat_type = str(recipient.get("chat_type") or "").casefold() if isinstance(recipient, dict) else ""
         is_private = chat_type == "dialog" or chat_id is None
         is_owner = sender_id in self.config.owner_ids
+
+        if (
+            not historical
+            and not is_private
+            and self.config.allowed_chat_ids
+            and chat_id not in self.config.allowed_chat_ids
+        ):
+            return
+        if not historical:
+            self.source.archive_update(update)
 
         if not text:
             return
@@ -112,6 +148,9 @@ class WorkBotService:
             return
 
         self.storage.save_report(message_id, sender_id, employee_name, parsed)
+
+    def retry_source_media(self, *, limit: int = 50) -> int:
+        return self.source.retry_pending_media(limit=limit)
 
     def _handle_owner_command(self, owner_id: int, text: str) -> None:
         command, _, arguments = text.partition(" ")

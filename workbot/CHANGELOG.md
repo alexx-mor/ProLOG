@@ -1,5 +1,19 @@
 # История изменений WorkBot
 
+## 2026-08-10 — P7 / WorkBot schema 2
+
+- Исходный MAX envelope теперь сохраняется до проверки текста и parser.
+- Добавлены неизменяемые revisions, ordered source attachments и tombstones.
+- Добавлено отдельное CAS-хранилище `workbot_media`, retry и diagnostics.
+- Photo-only сообщения сохраняются без создания legacy report rows.
+- ProductionEvent, production Attachment и автоматический historical backfill
+  не создаются.
+- Все `218` тестов проходят; dry-run будущей production-группы сохранил
+  8 messages / 9 revisions / 7 revision attachments / 6 физических файлов.
+- Рабочая база мигрирована `1 → 2` после backup в
+  `backups/pre-p7-20260810-132242`; legacy-подписи строк не изменились.
+- Подключение к MAX API проверено, WorkBot перезапущен одним процессом.
+
 Все заметные изменения WorkBot фиксируются в этом файле. Проект находится на
 этапе пилотной эксплуатации.
 

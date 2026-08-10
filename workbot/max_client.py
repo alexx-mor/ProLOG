@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import mimetypes
+import re
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlparse
 from urllib.request import Request, urlopen
+
+from workbot.source_models import DownloadedMedia, MediaUnavailableError
 
 
 class MaxApiError(RuntimeError):
@@ -51,11 +55,32 @@ class MaxClient:
         query: dict[str, object] = {
             "timeout": max(0, min(90, timeout)),
             "limit": 100,
-            "types": "message_created,message_edited,message_callback",
+            "types": "message_created,message_edited,message_removed,message_callback",
         }
         if marker is not None:
             query["marker"] = marker
         return self._request("GET", "/updates", query=query, timeout=timeout + 10)
+
+    def download_media(
+        self,
+        source_url: str | None,
+        attachment_type: str,
+        source_token: str | None,
+    ) -> DownloadedMedia:
+        url = source_url
+        if not url and attachment_type == "video" and source_token:
+            details = self._request("GET", f"/videos/{source_token}")
+            urls = details.get("urls") or {}
+            if isinstance(urls, dict):
+                for key in ("mp4_1080", "mp4_720", "mp4_480", "mp4_360", "mp4_240", "mp4_144", "hls"):
+                    if urls.get(key):
+                        url = str(urls[key])
+                        break
+        if not url:
+            raise MediaUnavailableError(
+                "MAX не предоставил URL для скачивания исходного media"
+            )
+        return self._download_url(url)
 
     def send_message(
         self,
@@ -164,6 +189,40 @@ class MaxClient:
         )
         return self._open_json(request, max(self.timeout, 60))
 
+    def _download_url(self, url: str) -> DownloadedMedia:
+        parsed = urlparse(url)
+        if parsed.scheme.casefold() != "https" or not parsed.hostname:
+            raise MediaUnavailableError("Разрешена загрузка media только по HTTPS")
+        hostname = parsed.hostname.casefold()
+        if hostname == "localhost" or hostname.endswith(".localhost"):
+            raise MediaUnavailableError("Небезопасный адрес media")
+        try:
+            address = ipaddress.ip_address(hostname)
+        except ValueError:
+            pass
+        else:
+            if not address.is_global:
+                raise MediaUnavailableError("Небезопасный адрес media")
+        request = Request(
+            url,
+            headers={"Accept": "*/*", "User-Agent": "ProLOG-WorkBot/0.6"},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=max(self.timeout, 60)) as response:
+                content = response.read()
+                content_type = str(response.headers.get_content_type() or "")
+                disposition = str(response.headers.get("Content-Disposition") or "")
+                final_url = str(response.geturl() or url)
+        except HTTPError as exc:
+            if exc.code in {404, 410}:
+                raise MediaUnavailableError(f"MAX media недоступно: HTTP {exc.code}") from exc
+            raise MaxApiError(f"Не удалось скачать MAX media: HTTP {exc.code}", status=exc.code) from exc
+        except URLError as exc:
+            raise MaxApiError(f"Не удалось скачать MAX media: {exc.reason}") from exc
+        filename = _response_filename(disposition, final_url)
+        return DownloadedMedia(content, content_type, filename)
+
     @staticmethod
     def _open_json(request: Request, timeout: int) -> dict[str, Any]:
         try:
@@ -188,3 +247,13 @@ class MaxClient:
         if not isinstance(result, dict):
             raise MaxApiError("MAX API вернул неожиданный формат ответа")
         return result
+
+
+def _response_filename(content_disposition: str, url: str) -> str:
+    extended = re.search(r"filename\*=UTF-8''([^;]+)", content_disposition, re.IGNORECASE)
+    if extended:
+        return Path(unquote(extended.group(1))).name
+    regular = re.search(r'filename="?([^";]+)', content_disposition, re.IGNORECASE)
+    if regular:
+        return Path(regular.group(1).strip()).name
+    return Path(unquote(urlparse(url).path)).name

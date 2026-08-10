@@ -226,10 +226,10 @@ def test_workbot_schema_baseline_is_versioned_and_idempotent(tmp_path: Path) -> 
     storage.initialize()
     second = storage.schema_versions()
 
-    assert [(item.component, item.current_version) for item in first] == [("workbot", 1)]
+    assert [(item.component, item.current_version) for item in first] == [("workbot", 2)]
     assert second == first
     with storage.connect() as connection:
-        assert connection.execute("SELECT COUNT(*) FROM SchemaMigrations").fetchone()[0] == 1
+        assert connection.execute("SELECT COUNT(*) FROM SchemaMigrations").fetchone()[0] == 2
 
 
 def _migration_history(database: Database) -> dict[str, list[tuple[object, ...]]]:
