@@ -113,7 +113,7 @@ def test_v5_to_v6_migration_is_additive_idempotent_and_preserves_p8(tmp_path: Pa
     assert _migration_history(database) == history
     assert _component_hashes(database) == component_hashes
     assert {item.component: item.current_version for item in database.schema_versions()} == {
-        "prolog": 6,
+        "prolog": 7,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -428,6 +428,20 @@ def _sync(context: Context, source_id: int | None = None):
 def _downgrade_to_v5(database: Database) -> None:
     with database.connect(foreign_keys=False) as connection:
         for trigger in (
+            "trg_production_match_runs_immutable",
+            "trg_production_match_runs_no_delete",
+            "trg_production_proposals_immutable_update",
+            "trg_production_proposals_immutable_delete",
+            "trg_production_product_candidates_immutable_update",
+            "trg_production_product_candidates_immutable_delete",
+            "trg_production_object_candidates_immutable_update",
+            "trg_production_object_candidates_immutable_delete",
+            "trg_production_stage_candidates_immutable_update",
+            "trg_production_stage_candidates_immutable_delete",
+            "trg_production_evidence_immutable_update",
+            "trg_production_evidence_immutable_delete",
+            "trg_production_issues_immutable_update",
+            "trg_production_issues_immutable_delete",
             "trg_production_inbox_bundle_messages_immutable_delete",
             "trg_production_inbox_bundle_messages_immutable_update",
             "trg_production_inbox_tombstones_immutable_delete",
@@ -435,6 +449,14 @@ def _downgrade_to_v5(database: Database) -> None:
         ):
             connection.execute(f"DROP TRIGGER IF EXISTS {trigger}")
         for table in (
+            "ProductionInboxProposalIssues",
+            "ProductionInboxProposalEvidence",
+            "ProductionInboxStageCandidates",
+            "ProductionInboxObjectCandidates",
+            "ProductionInboxProductCandidates",
+            "ProductionInboxProposals",
+            "ProductionInboxMatchRuns",
+            "ProductionStageAliases",
             "ProductionInboxBundleMessages",
             "ProductionInboxBundles",
             "ProductionInboxTombstoneSyncState",
@@ -442,7 +464,7 @@ def _downgrade_to_v5(database: Database) -> None:
         ):
             connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute(
-            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version = 6"
+            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version >= 6"
         )
 
 

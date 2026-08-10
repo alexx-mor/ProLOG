@@ -1,5 +1,52 @@
 ﻿# Changelog
 
+## 2026-08-10 - Deterministic production inbox matching (P10)
+
+### Added
+
+- Added `production-matcher-v1`, a deterministic and explainable interpretation
+  layer over current P9 bundles.
+- Added core schema 7 tables for conservative ProductionStage aliases,
+  immutable MatchRuns, typed proposals, ranked Product/Object/Stage candidates,
+  evidence and structured issues.
+- Added exact serial/code matching, confirmed aliases, object-scoped names,
+  independent ProductionStage matching, readiness parsing and conservative
+  multi-product segmentation.
+- Added matching diagnostics for stale context/bundle fingerprints, missing
+  directory references, conflicts, invalid readiness, candidate ranks, inactive
+  selections, unknown rules and broken lineage.
+
+### Architecture
+
+- Source revision, grouping result and interpretation are separate audit layers.
+  A directory or alias change creates a new MatchRun without rewriting source or
+  P9 bundles.
+- Candidate scores are deterministic ranking weights, not probabilities.
+- `сборка` and `готово` are intentionally not mapped to a ProductionStage.
+- P10 does not create ProductionEvent, Production Attachment or WorkLog, does
+  not modify Product state, and does not use AI, images or the WorkBot parser.
+- Application version advances from `0.6.5` to `0.6.6`; core advances from
+  schema `6` to `7`; WorkBot remains `2`, component schemas remain `1`.
+
+### Verified
+
+- Added 41 P10 migration, matching, ambiguity, segmentation, lineage,
+  idempotency, diagnostics and architecture tests; the complete suite passes
+  with `289 passed`.
+- Copied-data dry-run migrated core to schema 7 with clean integrity,
+  cross-database and matching diagnostics; a second pass created no MatchRuns.
+- The two real `text_only` bundles remained unresolved and reviewable; actual
+  duplicate `ШУ1`, `ШУ2` and `ВРУ` names were returned as candidates rather than
+  silently selected. Exact serial `3075` resolved its Product and Object.
+- Synthetic checks confirmed Stage/readiness extraction, photo-only handling,
+  explicit ambiguity, and that `сборка` does not infer a stage.
+- Pre-deployment backup: `backups/pre-p10-0.6.6-20260810-154830`.
+- Working migration created 14 stage aliases and two reviewable MatchRuns only;
+  ProductionEvent, Attachment, WorkLog and P8/P9 row signatures remained exact.
+- Staged and deployed Windows executables expose file/product version `0.6.6`
+  and passed eight-second smoke tests. Working config/auth remained byte-identical,
+  and WorkBot polling reconnected successfully to MAX API on schema 2.
+
 ## 2026-08-10 - Deterministic production inbox grouping (P9)
 
 ### Added

@@ -6,6 +6,8 @@ import sqlite3
 from datetime import datetime, timezone
 from uuid import uuid4
 
+from matching_text import normalize_alias_text
+
 
 PRODUCTION_STAGE_SEED: tuple[tuple[str, str], ...] = (
     ("PREPARATION", "Подготовка"),
@@ -540,6 +542,254 @@ END;
 """
 
 
+PRODUCTION_INBOX_MATCHING_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS ProductionStageAliases (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    stage_id INTEGER NOT NULL
+        REFERENCES ProductionStages(id) ON DELETE RESTRICT,
+    alias_text TEXT NOT NULL,
+    normalized_alias TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0, 1)),
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_production_stage_aliases_stage
+ON ProductionStageAliases(stage_id, is_active);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxMatchRuns (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    bundle_id INTEGER NOT NULL
+        REFERENCES ProductionInboxBundles(id) ON DELETE RESTRICT,
+    bundle_fingerprint TEXT NOT NULL CHECK(length(bundle_fingerprint) = 64),
+    matcher_rule_version TEXT NOT NULL,
+    directory_context_fingerprint TEXT NOT NULL
+        CHECK(length(directory_context_fingerprint) = 64),
+    input_text_hash TEXT NOT NULL CHECK(length(input_text_hash) = 64),
+    result_fingerprint TEXT NOT NULL CHECK(length(result_fingerprint) = 64),
+    source_text TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    has_media INTEGER NOT NULL CHECK(has_media IN (0, 1)),
+    status TEXT NOT NULL CHECK(status IN ('matched', 'needs_review', 'no_text')),
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK(is_current IN (0, 1)),
+    supersedes_match_run_id INTEGER NULL
+        REFERENCES ProductionInboxMatchRuns(id) ON DELETE RESTRICT,
+    superseded_at_utc TEXT NULL,
+    superseded_reason TEXT NOT NULL DEFAULT '',
+    created_at_utc TEXT NOT NULL,
+    CHECK(supersedes_match_run_id IS NULL OR supersedes_match_run_id <> id),
+    CHECK(is_current = 1 OR superseded_at_utc IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_production_inbox_match_runs_current
+ON ProductionInboxMatchRuns(bundle_id)
+WHERE is_current = 1;
+CREATE INDEX IF NOT EXISTS idx_production_inbox_match_runs_context
+ON ProductionInboxMatchRuns(
+    bundle_id, bundle_fingerprint, matcher_rule_version,
+    directory_context_fingerprint, input_text_hash
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_match_runs_lineage
+ON ProductionInboxMatchRuns(supersedes_match_run_id);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxProposals (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    match_run_id INTEGER NOT NULL
+        REFERENCES ProductionInboxMatchRuns(id) ON DELETE RESTRICT,
+    proposal_order INTEGER NOT NULL CHECK(proposal_order >= 0),
+    source_segment_text TEXT NOT NULL,
+    normalized_segment_text TEXT NOT NULL,
+    source_segment_start INTEGER NULL CHECK(source_segment_start IS NULL OR source_segment_start >= 0),
+    source_segment_end INTEGER NULL CHECK(source_segment_end IS NULL OR source_segment_end >= 0),
+    object_id INTEGER NULL,
+    object_match_method TEXT NULL,
+    product_id INTEGER NULL,
+    product_match_method TEXT NULL,
+    stage_id INTEGER NULL REFERENCES ProductionStages(id) ON DELETE RESTRICT,
+    stage_match_method TEXT NULL,
+    readiness_percent INTEGER NULL
+        CHECK(readiness_percent IS NULL OR readiness_percent BETWEEN 0 AND 100),
+    readiness_match_method TEXT NULL,
+    description_text TEXT NOT NULL,
+    normalized_description TEXT NOT NULL,
+    match_quality TEXT NOT NULL CHECK(match_quality IN ('exact', 'strong', 'ambiguous', 'none')),
+    requires_review INTEGER NOT NULL CHECK(requires_review IN (0, 1)),
+    issue_code TEXT NULL,
+    created_at_utc TEXT NOT NULL,
+    UNIQUE(match_run_id, proposal_order),
+    CHECK(
+        source_segment_start IS NULL OR source_segment_end IS NULL
+        OR source_segment_end >= source_segment_start
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_proposals_product
+ON ProductionInboxProposals(product_id);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_proposals_object
+ON ProductionInboxProposals(object_id);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_proposals_stage
+ON ProductionInboxProposals(stage_id);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxProductCandidates (
+    proposal_id INTEGER NOT NULL
+        REFERENCES ProductionInboxProposals(id) ON DELETE RESTRICT,
+    product_id INTEGER NOT NULL,
+    rank INTEGER NOT NULL CHECK(rank > 0),
+    deterministic_score INTEGER NOT NULL CHECK(deterministic_score BETWEEN 0 AND 100),
+    match_method TEXT NOT NULL,
+    matched_text TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    is_active_snapshot INTEGER NOT NULL CHECK(is_active_snapshot IN (0, 1)),
+    object_id_snapshot INTEGER NOT NULL,
+    PRIMARY KEY(proposal_id, product_id),
+    UNIQUE(proposal_id, rank)
+);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxObjectCandidates (
+    proposal_id INTEGER NOT NULL
+        REFERENCES ProductionInboxProposals(id) ON DELETE RESTRICT,
+    object_id INTEGER NOT NULL,
+    rank INTEGER NOT NULL CHECK(rank > 0),
+    deterministic_score INTEGER NOT NULL CHECK(deterministic_score BETWEEN 0 AND 100),
+    match_method TEXT NOT NULL,
+    matched_text TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    is_active_snapshot INTEGER NOT NULL CHECK(is_active_snapshot IN (0, 1)),
+    PRIMARY KEY(proposal_id, object_id),
+    UNIQUE(proposal_id, rank)
+);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxStageCandidates (
+    proposal_id INTEGER NOT NULL
+        REFERENCES ProductionInboxProposals(id) ON DELETE RESTRICT,
+    stage_id INTEGER NOT NULL
+        REFERENCES ProductionStages(id) ON DELETE RESTRICT,
+    rank INTEGER NOT NULL CHECK(rank > 0),
+    deterministic_score INTEGER NOT NULL CHECK(deterministic_score BETWEEN 0 AND 100),
+    match_method TEXT NOT NULL,
+    matched_text TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    is_active_snapshot INTEGER NOT NULL CHECK(is_active_snapshot IN (0, 1)),
+    PRIMARY KEY(proposal_id, stage_id),
+    UNIQUE(proposal_id, rank)
+);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxProposalEvidence (
+    proposal_id INTEGER NOT NULL
+        REFERENCES ProductionInboxProposals(id) ON DELETE RESTRICT,
+    field_name TEXT NOT NULL CHECK(field_name IN ('segmentation', 'object', 'product', 'stage', 'readiness')),
+    evidence_order INTEGER NOT NULL CHECK(evidence_order >= 0),
+    match_method TEXT NOT NULL,
+    matched_text TEXT NOT NULL,
+    explanation TEXT NOT NULL,
+    PRIMARY KEY(proposal_id, field_name, evidence_order)
+);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxProposalIssues (
+    proposal_id INTEGER NOT NULL
+        REFERENCES ProductionInboxProposals(id) ON DELETE RESTRICT,
+    issue_order INTEGER NOT NULL CHECK(issue_order >= 0),
+    issue_code TEXT NOT NULL,
+    message TEXT NOT NULL,
+    evidence_text TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY(proposal_id, issue_order)
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_production_match_runs_immutable
+BEFORE UPDATE OF
+    uid, bundle_id, bundle_fingerprint, matcher_rule_version,
+    directory_context_fingerprint, input_text_hash, result_fingerprint,
+    source_text, normalized_text, has_media, status, created_at_utc
+ON ProductionInboxMatchRuns
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxMatchRun interpretation is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_match_runs_no_delete
+BEFORE DELETE ON ProductionInboxMatchRuns
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxMatchRun cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_proposals_immutable_update
+BEFORE UPDATE ON ProductionInboxProposals
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProposal is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_proposals_immutable_delete
+BEFORE DELETE ON ProductionInboxProposals
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProposal cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_product_candidates_immutable_update
+BEFORE UPDATE ON ProductionInboxProductCandidates
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProductCandidate is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_product_candidates_immutable_delete
+BEFORE DELETE ON ProductionInboxProductCandidates
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProductCandidate cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_object_candidates_immutable_update
+BEFORE UPDATE ON ProductionInboxObjectCandidates
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxObjectCandidate is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_object_candidates_immutable_delete
+BEFORE DELETE ON ProductionInboxObjectCandidates
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxObjectCandidate cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_stage_candidates_immutable_update
+BEFORE UPDATE ON ProductionInboxStageCandidates
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxStageCandidate is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_stage_candidates_immutable_delete
+BEFORE DELETE ON ProductionInboxStageCandidates
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxStageCandidate cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_evidence_immutable_update
+BEFORE UPDATE ON ProductionInboxProposalEvidence
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProposalEvidence is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_evidence_immutable_delete
+BEFORE DELETE ON ProductionInboxProposalEvidence
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProposalEvidence cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_issues_immutable_update
+BEFORE UPDATE ON ProductionInboxProposalIssues
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProposalIssue is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_issues_immutable_delete
+BEFORE DELETE ON ProductionInboxProposalIssues
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxProposalIssue cannot be deleted');
+END;
+"""
+
+
+PRODUCTION_STAGE_ALIAS_SEED: tuple[tuple[str, str], ...] = (
+    ("METALWORK", "слесарка"),
+    ("METALWORK", "слесарные работы"),
+    ("EQUIPMENT_INSTALLATION", "монтаж оборудования"),
+    ("EQUIPMENT_INSTALLATION", "установка оборудования"),
+    ("ELECTRICAL_INSTALLATION", "электромонтаж"),
+    ("ELECTRICAL_INSTALLATION", "электромонтажные работы"),
+    ("MARKING", "маркировка"),
+    ("PROGRAMMING", "программирование"),
+    ("TESTING", "проверка"),
+    ("TESTING", "испытания"),
+    ("QUALITY_CONTROL", "отк"),
+    ("QUALITY_CONTROL", "контроль качества"),
+    ("PACKAGING", "упаковка"),
+    ("PREPARATION", "подготовка"),
+)
+
+
 def apply_production_stages_migration(connection: sqlite3.Connection) -> None:
     """Create and seed the standalone production-stage directory."""
 
@@ -598,3 +848,33 @@ def apply_production_inbox_grouping_migration(
     from schema_migrations import execute_sql_script
 
     execute_sql_script(connection, PRODUCTION_INBOX_GROUPING_SCHEMA_SQL)
+
+
+def apply_production_inbox_matching_migration(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create P10 matching persistence and conservative stage aliases."""
+
+    from schema_migrations import execute_sql_script
+
+    execute_sql_script(connection, PRODUCTION_INBOX_MATCHING_SCHEMA_SQL)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for stage_code, alias_text in PRODUCTION_STAGE_ALIAS_SEED:
+        stage = connection.execute(
+            "SELECT id FROM ProductionStages WHERE code = ? COLLATE NOCASE",
+            (stage_code,),
+        ).fetchone()
+        if stage is None:
+            continue
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO ProductionStageAliases (
+                uid, stage_id, alias_text, normalized_alias, is_active,
+                created_at_utc, updated_at_utc
+            ) VALUES (?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                str(uuid4()), int(stage[0]), alias_text,
+                normalize_alias_text(alias_text), now, now,
+            ),
+        )

@@ -175,7 +175,28 @@ def _confirm(context: EventContext, event: ProductionEvent) -> ProductionEvent:
 
 
 def _downgrade_core_to_v3(database: Database) -> None:
-    with database.connect() as connection:
+    with database.connect(foreign_keys=False) as connection:
+        for table in (
+            "ProductionInboxProposalIssues",
+            "ProductionInboxProposalEvidence",
+            "ProductionInboxStageCandidates",
+            "ProductionInboxObjectCandidates",
+            "ProductionInboxProductCandidates",
+            "ProductionInboxProposals",
+            "ProductionInboxMatchRuns",
+            "ProductionStageAliases",
+            "ProductionInboxBundleMessages",
+            "ProductionInboxBundles",
+            "ProductionInboxTombstoneSyncState",
+            "ProductionInboxSourceTombstones",
+            "ProductionInboxAttachments",
+            "ProductionInboxMessages",
+            "ProductionInboxSyncIssues",
+            "ProductionInboxSyncRuns",
+            "ProductionInboxSyncState",
+            "ProductionInboxSources",
+        ):
+            connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute("DROP TABLE ProductionEventAttachments")
         connection.execute("DROP TABLE ProductionEventWorkLogs")
         connection.execute("DROP TABLE ProductionEvents")
@@ -196,7 +217,7 @@ def test_migration_v3_to_v4_creates_exact_tables_and_foreign_keys(tmp_path: Path
     database.initialize()
 
     assert {item.component: item.current_version for item in database.schema_versions()} == {
-        "prolog": 6,
+        "prolog": 7,
         "employees": 1,
         "objects": 1,
         "products": 1,

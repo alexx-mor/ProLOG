@@ -33,7 +33,28 @@ def _service(database: Database) -> ProductionStageService:
 
 
 def _downgrade_core_to_v1(database: Database) -> None:
-    with database.connect() as connection:
+    with database.connect(foreign_keys=False) as connection:
+        for table in (
+            "ProductionInboxProposalIssues",
+            "ProductionInboxProposalEvidence",
+            "ProductionInboxStageCandidates",
+            "ProductionInboxObjectCandidates",
+            "ProductionInboxProductCandidates",
+            "ProductionInboxProposals",
+            "ProductionInboxMatchRuns",
+            "ProductionStageAliases",
+            "ProductionInboxBundleMessages",
+            "ProductionInboxBundles",
+            "ProductionInboxTombstoneSyncState",
+            "ProductionInboxSourceTombstones",
+            "ProductionInboxAttachments",
+            "ProductionInboxMessages",
+            "ProductionInboxSyncIssues",
+            "ProductionInboxSyncRuns",
+            "ProductionInboxSyncState",
+            "ProductionInboxSources",
+        ):
+            connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute("DROP TABLE ProductionEventAttachments")
         connection.execute("DROP TABLE ProductionEventWorkLogs")
         connection.execute("DROP TABLE ProductionEvents")
@@ -61,7 +82,7 @@ def test_migration_from_v1_preserves_existing_core_data(tmp_path: Path) -> None:
 
     versions = {item.component: item.current_version for item in database.schema_versions()}
     assert versions == {
-        "prolog": 6,
+        "prolog": 7,
         "employees": 1,
         "objects": 1,
         "products": 1,

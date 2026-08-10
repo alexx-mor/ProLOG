@@ -562,7 +562,7 @@ def test_p5_adds_no_persistent_projection_tables(context: ProjectionContext) -> 
             "SELECT MAX(version) FROM SchemaMigrations WHERE component = 'prolog'"
         ).fetchone()[0]
     assert not names & {"ProductCurrentState", "ProductTimeline", "ProductAnalytics"}
-    assert version == 6
+    assert version == 7
 
 
 def test_projection_layer_has_no_ui_workbot_sqlite_or_filesystem_imports() -> None:

@@ -227,6 +227,7 @@ class MainWindow(QMainWindow):
                 window_minutes=self.config.production_grouping_window_minutes,
                 utc_offset_minutes=self.config.production_grouping_utc_offset_minutes,
             )
+            matching_results = self.production_module.matching.match_all_current()
         except Exception:
             logger.exception("Failed to synchronize production source transport")
             self.statusBar().showMessage("Ошибка синхронизации production-source", 10000)
@@ -243,6 +244,11 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Production Inbox: сформировано пакетов "
                 f"{grouping_result.created_count}, обновлено {grouping_result.updated_count}",
+                10000,
+            )
+        elif any(result.created for result in matching_results):
+            self.statusBar().showMessage(
+                "Production Inbox: предложения сопоставления обновлены",
                 10000,
             )
 

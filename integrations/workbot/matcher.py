@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from matching_text import contains_identifier, normalize_alias_text
 from models import ProductItem
 
 
@@ -80,7 +81,7 @@ def detect_products(
 
 
 def normalize_product_alias(value: str) -> str:
-    return " ".join(value.replace("ё", "е").replace("Ё", "Е").casefold().split())
+    return normalize_alias_text(value)
 
 
 def _compact(value: str) -> str:
@@ -92,16 +93,4 @@ def _normalize(value: str) -> str:
 
 
 def _contains_identifier(text: str, identifier: str) -> bool:
-    tokens = [
-        part
-        for token in re.findall(r"[0-9a-zа-я]+", _normalize(identifier))
-        for part in re.findall(r"[a-zа-я]+|\d+", token)
-    ]
-    if not tokens:
-        return False
-    body = r"[^0-9a-zа-я]*".join(re.escape(token) for token in tokens)
-    if all(token.isdigit() for token in tokens):
-        pattern = rf"(?<!\d){body}(?!\d)"
-    else:
-        pattern = rf"(?<![0-9a-zа-я]){body}(?![0-9a-zа-я])"
-    return re.search(pattern, text) is not None
+    return contains_identifier(text, identifier)

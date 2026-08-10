@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 
 APP_NAME = "ProLOG"
-APP_VERSION = "0.6.5"
+APP_VERSION = "0.6.6"
 GITHUB_OWNER = "alexx-mor"
 GITHUB_REPO = "ProLOG"
 

@@ -13,6 +13,8 @@ from production.event_repository import ProductionEventRepository
 from production.event_service import ProductionService
 from production.grouping_repository import ProductionInboxGroupingRepository
 from production.grouping_service import ProductionInboxGroupingService
+from production.matching_repository import ProductionInboxMatchingRepository
+from production.matching_service import ProductionInboxMatchingService
 from production.local_attachment_store import LocalAttachmentStore
 from production.projections import ProductionProjectionService
 from production.repository import ProductionStageRepository
@@ -30,6 +32,7 @@ class ProductionModule:
     projections: ProductionProjectionService
     source_transport: ProductionSourceTransportService
     grouping: ProductionInboxGroupingService
+    matching: ProductionInboxMatchingService
 
 
 def build_production_module(
@@ -49,6 +52,9 @@ def build_production_module(
     )
     grouping = ProductionInboxGroupingService(
         ProductionInboxGroupingRepository(database)
+    )
+    matching = ProductionInboxMatchingService(
+        ProductionInboxMatchingRepository(database)
     )
     projections = ProductionProjectionService(
         events,
@@ -78,4 +84,5 @@ def build_production_module(
         projections=projections,
         source_transport=source_transport,
         grouping=grouping,
+        matching=matching,
     )
