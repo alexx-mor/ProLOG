@@ -16,6 +16,7 @@ from app_modules import (
     MODULE_EMPLOYEE_ADMIN,
     MODULE_LEGACY_IMPORT,
     MODULE_PAYROLL,
+    MODULE_PRODUCTION_INBOX,
     MODULE_REPORT_EXPORT,
     MODULE_UPDATES,
     MODULE_USERS,
@@ -41,6 +42,8 @@ from ui.employee_widget import EmployeeWidget
 from ui.legacy_import_dialog import LegacyImportDialog
 from ui.product_production_dialog import ProductProductionDialog
 from ui.production_controller import ProductionUiController
+from ui.production_inbox_controller import ProductionInboxController
+from ui.production_inbox_widget import ProductionInboxWidget
 from ui.production_overview_widget import ProductionOverviewWidget
 from ui.report_viewer_widget import ReportViewerWidget
 from ui.setup_wizard import InitialSetupDialog
@@ -82,6 +85,14 @@ class MainWindow(QMainWindow):
             self.production_module.exports,
             lambda: self.auth_session,
         )
+        self.production_inbox_controller = ProductionInboxController(
+            self.production_module.review,
+            self.directories,
+            self.employees,
+            self.production_module.stages,
+            lambda: self.auth_session,
+            self._run_production_source_pipeline,
+        )
         self.analytics = AnalyticsService(self.worklogs, self.employees, self.directories)
         self.legacy_importer = LegacyExcelImportService(database, self.employees, self.directories, self.worklogs)
         self.workbot = WorkBotIntegrationService(
@@ -97,6 +108,7 @@ class MainWindow(QMainWindow):
         self.report_viewer = ReportViewerWidget()
         self.analytics_widget = AnalyticsWidget()
         self.production_overview = ProductionOverviewWidget(self.production_ui)
+        self.production_inbox = ProductionInboxWidget(self.production_inbox_controller)
         self.workbot_inbox = WorkBotInboxWidget(self.workbot)
         self.workbot_inbox.set_source_path(self.config.workbot_database_path)
         self.workbot_inbox.set_reviewer(self.auth_session.username)
@@ -112,7 +124,7 @@ class MainWindow(QMainWindow):
         self.refresh_report_viewer()
         self.refresh_analytics()
         self.workbot_inbox.refresh()
-        self._sync_production_sources()
+        self._configure_production_media_reader()
         self.employee_widget.apply_column_widths(self.config.employee_column_widths)
         self.worklog_widget.apply_column_widths(self.config.worklog_column_widths)
         if self.config.check_updates_on_startup:
@@ -161,6 +173,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self.splitter, "Заполнение отчетов")
         self.tabs.addTab(self.workbot_inbox, "Входящие отчеты")
+        self.tabs.addTab(self.production_inbox, "Фотоотчёты")
         self.tabs.addTab(self.production_overview, "Производство")
         self.tabs.addTab(self.report_viewer, "Просмотр отчетов")
         self.tabs.addTab(self.analytics_widget, "Аналитика")
@@ -207,50 +220,89 @@ class MainWindow(QMainWindow):
         self.report_viewer.entry_delete_requested.connect(self.delete_worklog_entry)
         self.analytics_widget.filters_changed.connect(self.refresh_analytics)
         self.production_overview.card_requested.connect(self.open_product_production)
+        self.production_inbox.product_open_requested.connect(self.open_product_production)
+        self.production_inbox.status_message.connect(
+            lambda message: self.statusBar().showMessage(message, 10000)
+        )
         self.workbot_inbox.source_path_changed.connect(self._save_workbot_source_path)
         self.workbot_inbox.imported.connect(self.refresh_worklogs)
         self.workbot_inbox.bindings_changed.connect(self.refresh_employees)
         self.workbot_inbox.status_message.connect(lambda message: self.statusBar().showMessage(message, 10000))
         self.workbot_inbox.source_synced.connect(self._sync_production_sources)
+        self.tabs.currentChanged.connect(self._tab_changed)
 
     def _sync_production_sources(self) -> None:
-        value = self.config.workbot_database_path.strip()
-        if not value:
-            return
         try:
-            gateway = WorkBotProductionSourceGateway(
-                Path(value),
-                workbot_media_root_path(self.config),
-            )
-            results = self.production_module.source_transport.sync_enabled_sources(gateway)
-            grouping_result = self.production_module.grouping.regroup(
-                window_minutes=self.config.production_grouping_window_minutes,
-                utc_offset_minutes=self.config.production_grouping_utc_offset_minutes,
-            )
-            matching_results = self.production_module.matching.match_all_current()
+            summary = self._run_production_source_pipeline()
         except Exception:
             logger.exception("Failed to synchronize production source transport")
             self.statusBar().showMessage("Ошибка синхронизации production-source", 10000)
             return
-        imported = sum(item.imported_count for item in results)
-        changed = sum(item.changed_count for item in results)
-        errors = sum(item.error_count for item in results)
-        if imported or changed or errors:
+        if summary.imported_messages or summary.changed_messages or summary.source_errors:
             self.statusBar().showMessage(
-                f"Production-source: новых {imported}, изменений {changed}, ошибок {errors}",
+                f"Production-source: новых {summary.imported_messages}, "
+                f"изменений {summary.changed_messages}, ошибок {summary.source_errors}",
                 10000,
             )
-        elif grouping_result.created_count or grouping_result.updated_count:
-            self.statusBar().showMessage(
-                "Production Inbox: сформировано пакетов "
-                f"{grouping_result.created_count}, обновлено {grouping_result.updated_count}",
-                10000,
+        self.production_inbox.refresh_queue()
+
+    def _configure_production_media_reader(self) -> None:
+        value = self.config.workbot_database_path.strip()
+        if not value:
+            self.production_module.review.set_source_media_reader(None)
+            return
+        gateway = WorkBotProductionSourceGateway(
+            Path(value),
+            workbot_media_root_path(self.config),
+        )
+        self.production_module.review.set_source_media_reader(gateway)
+
+    def _run_production_source_pipeline(self):
+        from datetime import datetime, timezone
+
+        from production.review_models import RefreshSummary, ReviewFilter
+
+        value = self.config.workbot_database_path.strip()
+        if not value:
+            return RefreshSummary(
+                requires_review=len(
+                    self.production_module.review.list_items(ReviewFilter.REQUIRES_REVIEW)
+                ),
+                source_changed=len(
+                    self.production_module.review.list_items(ReviewFilter.SOURCE_CHANGED)
+                ),
+                refreshed_at_utc=datetime.now(timezone.utc),
             )
-        elif any(result.created for result in matching_results):
-            self.statusBar().showMessage(
-                "Production Inbox: предложения сопоставления обновлены",
-                10000,
-            )
+        gateway = WorkBotProductionSourceGateway(
+            Path(value),
+            workbot_media_root_path(self.config),
+        )
+        self.production_module.review.set_source_media_reader(gateway)
+        results = self.production_module.source_transport.sync_enabled_sources(gateway)
+        grouping_result = self.production_module.grouping.regroup(
+            window_minutes=self.config.production_grouping_window_minutes,
+            utc_offset_minutes=self.config.production_grouping_utc_offset_minutes,
+        )
+        matching_results = self.production_module.matching.match_all_current()
+        return RefreshSummary(
+            imported_messages=sum(item.imported_count for item in results),
+            changed_messages=sum(item.changed_count for item in results),
+            source_errors=sum(item.error_count for item in results),
+            new_bundles=grouping_result.created_count,
+            updated_bundles=grouping_result.updated_count,
+            new_match_runs=sum(int(item.created) for item in matching_results),
+            requires_review=len(
+                self.production_module.review.list_items(ReviewFilter.REQUIRES_REVIEW)
+            ),
+            source_changed=len(
+                self.production_module.review.list_items(ReviewFilter.SOURCE_CHANGED)
+            ),
+            refreshed_at_utc=datetime.now(timezone.utc),
+        )
+
+    def _tab_changed(self, index: int) -> None:
+        if self.tabs.widget(index) is self.production_inbox:
+            self.production_inbox.request_refresh()
 
     def refresh_directories(self) -> None:
         active_objects = self.directories.list("objects")
@@ -268,6 +320,8 @@ class MainWindow(QMainWindow):
         self.analytics_widget.set_objects(self.directories.list_all("objects"))
         self.analytics_widget.set_products(self.directories.list_products(active_only=False))
         self.production_overview.refresh()
+        self.production_inbox.reload_directories()
+        self.production_inbox.refresh_queue()
         self._refresh_workbot_reference_data()
 
     def refresh_employees(self, search: str = "") -> None:
@@ -331,6 +385,9 @@ class MainWindow(QMainWindow):
         can_view_payroll = role_can_access(self.auth_session.role, MODULE_PAYROLL)
         can_check_updates = role_can_access(self.auth_session.role, MODULE_UPDATES)
         can_view_workbot = role_can_access(self.auth_session.role, MODULE_WORKBOT_INBOX)
+        can_review_production = role_can_access(
+            self.auth_session.role, MODULE_PRODUCTION_INBOX
+        )
         self.import_action.setEnabled(is_employee_admin)
         self.export_employees_action.setEnabled(is_employee_admin)
         self.directories_action.setEnabled(can_edit_directories)
@@ -349,6 +406,14 @@ class MainWindow(QMainWindow):
             self.tabs.setTabVisible(workbot_index, can_view_workbot)
             if not can_view_workbot and self.tabs.currentWidget() is self.workbot_inbox:
                 self.tabs.setCurrentIndex(0)
+        production_inbox_index = self.tabs.indexOf(self.production_inbox)
+        if production_inbox_index >= 0:
+            self.tabs.setTabVisible(production_inbox_index, can_review_production)
+            if (
+                not can_review_production
+                and self.tabs.currentWidget() is self.production_inbox
+            ):
+                self.tabs.setCurrentIndex(0)
         self.setWindowTitle(f"{APP_NAME} - {self.auth_session.username}")
 
     def _refresh_workbot_reference_data(self) -> None:
@@ -363,6 +428,7 @@ class MainWindow(QMainWindow):
     def _save_workbot_source_path(self, value: str) -> None:
         self.config.workbot_database_path = value
         self.config_manager.save(self.config)
+        self._configure_production_media_reader()
         self.statusBar().showMessage("Путь к базе WorkBot сохранен", 5000)
 
     def showEvent(self, event) -> None:

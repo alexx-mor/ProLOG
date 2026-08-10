@@ -113,7 +113,7 @@ def test_v5_to_v6_migration_is_additive_idempotent_and_preserves_p8(tmp_path: Pa
     assert _migration_history(database) == history
     assert _component_hashes(database) == component_hashes
     assert {item.component: item.current_version for item in database.schema_versions()} == {
-        "prolog": 7,
+        "prolog": 8,
         "employees": 1,
         "objects": 1,
         "products": 1,

@@ -1,5 +1,51 @@
 ﻿# Changelog
 
+## 2026-08-10 - Production photo-report review (P11)
+
+### Added
+
+- Added the main `Фотоотчёты` workspace with review queue, filters, source-order
+  messages/photos, P10 evidence, editable final values and background P8-P10
+  refresh.
+- Added core schema 8 typed review decisions, append-only audit actions,
+  attachment promotion provenance and manual split/merge lineage.
+- Added explicit confirm/reject/source-changed workflows. Confirmation promotes
+  verified WorkBot media into normal Production Attachments and creates events
+  exclusively through ProductionService.
+- Added stale source/context protection, deterministic confirmation idempotency,
+  post-confirm recovery, correction/supersede support and explicit alias learning.
+
+### Architecture
+
+- P8 source, P9 grouping and P10 interpretation remain immutable audit layers.
+  Manual bundles replace them only in the review-effective projection.
+- MAX sender is an optional Employee reporter; the current ProLOG User remains
+  the independent Actor of every decision.
+- No source refresh, grouping or matching operation auto-confirms a
+  ProductionEvent.
+- Application version advances from `0.6.6` to `0.7.0`; core advances from
+  schema `7` to `8`; WorkBot remains `2`, component schemas remain `1`.
+
+### Verified
+
+- Added P11 migration, review lifecycle, media promotion, stale/edit,
+  correction, readiness-decrease, rejection, manual grouping and Qt/offscreen
+  coverage; the complete suite passes with `320 passed`.
+- Copied-data dry-run at `backups/p11-dry-run-20260810-170527` exercised the
+  P7-P11 path with three original photos, exact serial/stage/readiness matching,
+  confirmation, export, source edit, correction and manual split. Original
+  bytes/order and the complete audit chain were preserved; all integrity,
+  reference, attachment and review diagnostics passed.
+- Full pre-deployment backup: `backups/pre-p11-0.7.0-20260810-170527`, including
+  core/component/WorkBot databases, both media roots, config/auth and the old
+  executable/runtime.
+- Working migration created empty P11 review infrastructure at core schema 8.
+  Existing signatures remain exact: 2 ProductionEvents, 2 Attachments,
+  99 WorkLogs and all P8/P9/P10 source, grouping and matching rows.
+- Staged and deployed executables expose file/product version `0.7.0` and passed
+  eight-second smoke tests. Config/auth stayed byte-identical and WorkBot
+  reconnected to MAX as `@id615018254294_bot` on schema 2.
+
 ## 2026-08-10 - Deterministic production inbox matching (P10)
 
 ### Added

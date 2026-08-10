@@ -118,7 +118,7 @@ def test_core_v4_to_v5_is_additive_idempotent_and_preserves_components(tmp_path:
     assert _migration_history(database) == first
     assert _component_hashes(database) == before
     assert {item.component: item.current_version for item in database.schema_versions()} == {
-        "prolog": 7,
+        "prolog": 8,
         "employees": 1,
         "objects": 1,
         "products": 1,

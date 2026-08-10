@@ -55,6 +55,7 @@ from production.migrations import (
     apply_production_events_migration,
     apply_production_inbox_grouping_migration,
     apply_production_inbox_matching_migration,
+    apply_production_inbox_review_migration,
     apply_production_source_transport_migration,
     apply_production_stages_migration,
 )
@@ -90,7 +91,7 @@ ALIAS_DEFINITIONS = {
     "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
 }
 
-PROLOG_SCHEMA_VERSION = 7
+PROLOG_SCHEMA_VERSION = 8
 PROLOG_SCHEMA_COMPONENTS = (
     MigrationComponent("prolog", "main"),
     MigrationComponent("employees", "employees_db"),
@@ -222,10 +223,16 @@ class Database:
                     apply=self._apply_production_inbox_grouping_migration,
                 ),
                 Migration(
-                    version=PROLOG_SCHEMA_VERSION,
+                    version=7,
                     name="Deterministic production inbox matching",
                     fingerprint="prolog-production-inbox-matching-v7",
                     apply=self._apply_production_inbox_matching_migration,
+                ),
+                Migration(
+                    version=PROLOG_SCHEMA_VERSION,
+                    name="Production inbox review and confirmation",
+                    fingerprint="prolog-production-inbox-review-v8",
+                    apply=self._apply_production_inbox_review_migration,
                 ),
             ),
             app_version=APP_VERSION,
@@ -294,6 +301,12 @@ class Database:
         connection: sqlite3.Connection,
     ) -> None:
         apply_production_inbox_matching_migration(connection)
+
+    def _apply_production_inbox_review_migration(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        apply_production_inbox_review_migration(connection)
 
     def _apply_baseline_migration(self, connection: sqlite3.Connection) -> None:
         execute_sql_script(connection, COMPONENT_SCHEMA_SQL)

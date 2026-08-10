@@ -63,7 +63,7 @@ def test_v6_to_v7_migration_is_additive_idempotent_and_preserves_p9(tmp_path: Pa
     assert _migration_history(database) == history
     assert _component_hashes(database) == component_hashes
     assert {item.component: item.current_version for item in database.schema_versions()} == {
-        "prolog": 7, "employees": 1, "objects": 1, "products": 1, "aliases": 1,
+        "prolog": 8, "employees": 1, "objects": 1, "products": 1, "aliases": 1,
     }
     with database.connect() as connection:
         assert connection.execute(
@@ -491,6 +491,9 @@ def _create_bundle(database: Database, message_id: str, text: str, *, media: boo
 
 def _downgrade_to_v6(database: Database) -> None:
     triggers = (
+        "trg_production_review_identity_immutable", "trg_production_review_no_delete",
+        "trg_production_review_actions_immutable_update", "trg_production_review_actions_immutable_delete",
+        "trg_production_manual_lineage_immutable_update", "trg_production_manual_lineage_immutable_delete",
         "trg_production_match_runs_immutable", "trg_production_match_runs_no_delete",
         "trg_production_proposals_immutable_update", "trg_production_proposals_immutable_delete",
         "trg_production_product_candidates_immutable_update", "trg_production_product_candidates_immutable_delete",
@@ -500,6 +503,8 @@ def _downgrade_to_v6(database: Database) -> None:
         "trg_production_issues_immutable_update", "trg_production_issues_immutable_delete",
     )
     tables = (
+        "ProductionInboxReviewAttachmentPromotions", "ProductionInboxReviewActions",
+        "ProductionInboxReviews", "ProductionInboxManualBundleSources",
         "ProductionInboxProposalIssues", "ProductionInboxProposalEvidence",
         "ProductionInboxStageCandidates", "ProductionInboxObjectCandidates",
         "ProductionInboxProductCandidates", "ProductionInboxProposals",
@@ -511,7 +516,7 @@ def _downgrade_to_v6(database: Database) -> None:
         for table in tables:
             connection.execute(f"DROP TABLE IF EXISTS {table}")
         connection.execute(
-            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version = 7"
+            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version >= 7"
         )
 
 

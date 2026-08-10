@@ -24,6 +24,7 @@ from production.matching_models import (
     ProposalEvidence,
     ProposalIssue,
 )
+from production.review_repository import REVIEW_EFFECTIVE_BUNDLES_SQL
 
 
 class ProductionInboxMatchingRepository:
@@ -33,7 +34,7 @@ class ProductionInboxMatchingRepository:
     def current_bundle_ids(self) -> tuple[int, ...]:
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id FROM ProductionInboxBundles WHERE is_current = 1 ORDER BY id"
+                f"SELECT id FROM ({REVIEW_EFFECTIVE_BUNDLES_SQL}) ORDER BY id"
             ).fetchall()
         return tuple(int(row[0]) for row in rows)
 
@@ -229,8 +230,8 @@ class ProductionInboxMatchingRepository:
                 UPDATE ProductionInboxMatchRuns
                 SET is_current = 0, superseded_at_utc = ?,
                     superseded_reason = 'source_bundle_changed'
-                WHERE is_current = 1 AND bundle_id IN (
-                    SELECT id FROM ProductionInboxBundles WHERE is_current = 0
+                WHERE is_current = 1 AND bundle_id NOT IN (
+                    SELECT id FROM (""" + REVIEW_EFFECTIVE_BUNDLES_SQL + """)
                 )
                 """,
                 (now,),
@@ -276,7 +277,10 @@ class ProductionInboxMatchingRepository:
         with self.database.connect() as connection:
             return {
                 "current_bundles": connection.execute(
-                    "SELECT id, source_fingerprint FROM ProductionInboxBundles WHERE is_current = 1"
+                    f"""
+                    SELECT id, source_fingerprint FROM ProductionInboxBundles
+                    WHERE id IN ({REVIEW_EFFECTIVE_BUNDLES_SQL})
+                    """
                 ).fetchall(),
                 "current_runs": connection.execute(
                     """

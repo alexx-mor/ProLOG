@@ -126,6 +126,16 @@ class WorkBotProductionSourceGateway:
             for row in rows
         )
 
+    def read_media(self, storage_key: str, expected_sha256: str) -> bytes:
+        """Read and verify immutable WorkBot source media for application use-cases."""
+
+        verification = self.store.verify(storage_key, expected_sha256)
+        if not verification.exists:
+            raise FileNotFoundError("Физический файл WorkBot media отсутствует")
+        if not verification.is_valid:
+            raise ContentStoreError("SHA-256 WorkBot media не совпадает с source metadata")
+        return self.store.read(storage_key)
+
     def _connect(self) -> sqlite3.Connection:
         if not self.database_path.is_file():
             raise FileNotFoundError(f"База WorkBot не найдена: {self.database_path}")

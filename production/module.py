@@ -18,9 +18,12 @@ from production.matching_service import ProductionInboxMatchingService
 from production.local_attachment_store import LocalAttachmentStore
 from production.projections import ProductionProjectionService
 from production.repository import ProductionStageRepository
+from production.review_repository import ProductionInboxReviewRepository
+from production.review_service import ProductionInboxReviewService
 from production.service import ProductionStageService
 from production.source_transport_repository import ProductionSourceTransportRepository
 from production.source_transport_service import ProductionSourceTransportService
+from production.stage_alias_repository import ProductionStageAliasRepository
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +36,7 @@ class ProductionModule:
     source_transport: ProductionSourceTransportService
     grouping: ProductionInboxGroupingService
     matching: ProductionInboxMatchingService
+    review: ProductionInboxReviewService
 
 
 def build_production_module(
@@ -68,21 +72,30 @@ def build_production_module(
         attachments,
         LocalAttachmentStore(attachment_root),
     )
+    event_service = ProductionService(
+        events,
+        stages,
+        attachments,
+        directories,
+        employees,
+        worklogs,
+        projection_service=projections,
+    )
     return ProductionModule(
         stages=ProductionStageService(stages),
         attachments=attachment_service,
         exports=AttachmentExportService(attachment_service),
-        events=ProductionService(
-            events,
-            stages,
-            attachments,
-            directories,
-            employees,
-            worklogs,
-            projection_service=projections,
-        ),
+        events=event_service,
         projections=projections,
         source_transport=source_transport,
         grouping=grouping,
         matching=matching,
+        review=ProductionInboxReviewService(
+            ProductionInboxReviewRepository(database),
+            matching,
+            event_service,
+            attachment_service,
+            directories,
+            ProductionStageAliasRepository(database),
+        ),
     )
