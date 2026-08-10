@@ -14,6 +14,7 @@ from production.source_transport_models import (
     SourceRevisionSnapshot,
     SourceRevisionFailure,
     SourceSyncCursor,
+    SourceTombstoneSnapshot,
 )
 
 
@@ -96,6 +97,14 @@ class ProductionSourceTransportRepository:
                 """
                 INSERT OR IGNORE INTO ProductionInboxSyncState(source_id, updated_at_utc)
                 VALUES (?, ?)
+                """,
+                (row_id, _iso(now)),
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO ProductionInboxTombstoneSyncState(
+                    source_id, updated_at_utc
+                ) VALUES (?, ?)
                 """,
                 (row_id, _iso(now)),
             )
@@ -201,6 +210,68 @@ class ProductionSourceTransportRepository:
                 WHERE source_id = ?
                 """,
                 (now, source_id),
+            )
+
+    def tombstone_cursor(self, source_id: int) -> int:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT cursor_tombstone_id
+                FROM ProductionInboxTombstoneSyncState WHERE source_id = ?
+                """,
+                (source_id,),
+            ).fetchone()
+        return int(row[0]) if row is not None else 0
+
+    def import_tombstone(
+        self,
+        source_id: int,
+        tombstone: SourceTombstoneSnapshot,
+    ) -> bool:
+        now = _iso(_utc_now())
+        with self.database.connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT raw_update_json FROM ProductionInboxSourceTombstones
+                WHERE source_id = ? AND source_tombstone_id = ?
+                """,
+                (source_id, tombstone.tombstone_id),
+            ).fetchone()
+            if existing is not None:
+                if str(existing[0]) != tombstone.raw_update_json:
+                    raise SourceRevisionConflictError(
+                        "Один source tombstone содержит различное содержимое"
+                    )
+                return False
+            connection.execute(
+                """
+                INSERT INTO ProductionInboxSourceTombstones (
+                    uid, source_id, source_tombstone_id, source_message_id,
+                    chat_id, deleted_at_utc, raw_update_json, transported_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid4()), source_id, tombstone.tombstone_id,
+                    tombstone.source_message_id, tombstone.chat_id,
+                    _iso(tombstone.deleted_at_utc), tombstone.raw_update_json, now,
+                ),
+            )
+        return True
+
+    def advance_tombstone_cursor(self, source_id: int, tombstone_id: int) -> None:
+        now = _iso(_utc_now())
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO ProductionInboxTombstoneSyncState (
+                    source_id, cursor_tombstone_id, last_sync_at_utc, updated_at_utc
+                ) VALUES (?, ?, ?, ?)
+                ON CONFLICT(source_id) DO UPDATE SET
+                    cursor_tombstone_id = excluded.cursor_tombstone_id,
+                    last_sync_at_utc = excluded.last_sync_at_utc,
+                    updated_at_utc = excluded.updated_at_utc
+                """,
+                (source_id, tombstone_id, now, now),
             )
 
     def begin_run(self, source_id: int, cursor_before: int) -> int:

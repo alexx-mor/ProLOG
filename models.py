@@ -156,6 +156,8 @@ class AppSettings:
     monthly_hours_norm: int = 168
     workbot_database_path: str = ""
     workbot_media_root: str = ""
+    production_grouping_window_minutes: int = 15
+    production_grouping_utc_offset_minutes: int = 180
     prolog_database_path: str = ""
     employees_database_path: str = ""
     objects_database_path: str = ""

@@ -11,6 +11,8 @@ from production.attachment_export import AttachmentExportService
 from production.attachment_service import AttachmentService
 from production.event_repository import ProductionEventRepository
 from production.event_service import ProductionService
+from production.grouping_repository import ProductionInboxGroupingRepository
+from production.grouping_service import ProductionInboxGroupingService
 from production.local_attachment_store import LocalAttachmentStore
 from production.projections import ProductionProjectionService
 from production.repository import ProductionStageRepository
@@ -27,6 +29,7 @@ class ProductionModule:
     events: ProductionService
     projections: ProductionProjectionService
     source_transport: ProductionSourceTransportService
+    grouping: ProductionInboxGroupingService
 
 
 def build_production_module(
@@ -43,6 +46,9 @@ def build_production_module(
     events = ProductionEventRepository(database)
     source_transport = ProductionSourceTransportService(
         ProductionSourceTransportRepository(database)
+    )
+    grouping = ProductionInboxGroupingService(
+        ProductionInboxGroupingRepository(database)
     )
     projections = ProductionProjectionService(
         events,
@@ -71,4 +77,5 @@ def build_production_module(
         ),
         projections=projections,
         source_transport=source_transport,
+        grouping=grouping,
     )

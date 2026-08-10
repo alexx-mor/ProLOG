@@ -16,6 +16,7 @@ from production.source_transport_models import (
     SourceRevisionSnapshot,
     SourceRevisionFailure,
     SourceSyncCursor,
+    SourceTombstoneSnapshot,
 )
 from workbot.media_store import WorkBotMediaStore
 
@@ -95,6 +96,34 @@ class WorkBotProductionSourceGateway:
         return SourceSyncCursor(
             int(row["id"]), str(row["source_message_id"]),
             int(row["revision_number"]), str(row["content_hash"]),
+        )
+
+    def fetch_tombstones(
+        self,
+        chat_id: int,
+        after_tombstone_id: int,
+        *,
+        limit: int,
+    ) -> tuple[SourceTombstoneSnapshot, ...]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM source_message_tombstones
+                WHERE chat_id = ? AND id > ?
+                ORDER BY id
+                LIMIT ?
+                """,
+                (chat_id, after_tombstone_id, max(1, limit)),
+            ).fetchall()
+        return tuple(
+            SourceTombstoneSnapshot(
+                tombstone_id=int(row["id"]),
+                source_message_id=str(row["source_message_id"]),
+                chat_id=int(row["chat_id"]) if row["chat_id"] is not None else None,
+                deleted_at_utc=_datetime(row["deleted_at_utc"]),
+                raw_update_json=str(row["raw_update_json"]),
+            )
+            for row in rows
         )
 
     def _connect(self) -> sqlite3.Connection:

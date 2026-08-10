@@ -223,6 +223,10 @@ class MainWindow(QMainWindow):
                 workbot_media_root_path(self.config),
             )
             results = self.production_module.source_transport.sync_enabled_sources(gateway)
+            grouping_result = self.production_module.grouping.regroup(
+                window_minutes=self.config.production_grouping_window_minutes,
+                utc_offset_minutes=self.config.production_grouping_utc_offset_minutes,
+            )
         except Exception:
             logger.exception("Failed to synchronize production source transport")
             self.statusBar().showMessage("Ошибка синхронизации production-source", 10000)
@@ -233,6 +237,12 @@ class MainWindow(QMainWindow):
         if imported or changed or errors:
             self.statusBar().showMessage(
                 f"Production-source: новых {imported}, изменений {changed}, ошибок {errors}",
+                10000,
+            )
+        elif grouping_result.created_count or grouping_result.updated_count:
+            self.statusBar().showMessage(
+                "Production Inbox: сформировано пакетов "
+                f"{grouping_result.created_count}, обновлено {grouping_result.updated_count}",
                 10000,
             )
 

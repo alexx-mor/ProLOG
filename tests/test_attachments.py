@@ -83,7 +83,7 @@ def test_migration_v2_to_v3_has_exact_attachment_schema(tmp_path: Path) -> None:
 
     versions = {item.component: item.current_version for item in database.schema_versions()}
     assert versions == {
-        "prolog": 5,
+        "prolog": 6,
         "employees": 1,
         "objects": 1,
         "products": 1,

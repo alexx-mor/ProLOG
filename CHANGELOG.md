@@ -1,5 +1,55 @@
 ﻿# Changelog
 
+## 2026-08-10 - Deterministic production inbox grouping (P9)
+
+### Added
+
+- Added sender-isolated deterministic grouping over immutable P8 source
+  revisions with a configurable 15-minute default window and explicit local-day
+  boundary.
+- Added core schema 6 tables for production inbox bundles, ordered bundle-message
+  relations, transported source tombstones and a revision-aware tombstone cursor.
+- Added technical grouping states, message roles, `deterministic-v1` rule version,
+  SHA-256 bundle fingerprints and auditable supersession lineage.
+- Added structured diagnostics for ungrouped or multiply grouped source messages,
+  mixed senders/sources/chats, ordering faults, stale bundles, fingerprints,
+  unknown rule versions and broken lineage.
+
+### Architecture
+
+- Grouping state is independent for `source_id + chat_id + sender_max_user_id`;
+  another sender never closes or captures an open sequence.
+- Bundles are derived and reproducible. P8 source snapshots remain immutable,
+  while edits and tombstones create a new current bundle and retain old grouping
+  history.
+- P9 does not match Product, Object or ProductionStage, parse readiness, create
+  ProductionEvent/Production Attachment/WorkLog, or change WorkBot.
+- Application version advances from `0.6.4` to `0.6.5`; core advances from schema
+  `5` to `6`; WorkBot remains `2` and component schemas remain `1`.
+
+### Verified
+
+- Added 15 P9 migration, lifecycle, ordering, timeout, interleaving, revision,
+  tombstone, idempotency and architecture scenarios; the complete suite passes
+  with `248 passed`.
+- Working data was backed up before migration to
+  `backups/pre-p9-20260810-145953`, including core/component databases,
+  production attachments, WorkBot SQLite/media, configuration and executable.
+- The copied-data run at `backups/p9-dry-run-20260810-150056` migrated core to
+  schema 6 and grouped two real production-source texts as two standalone
+  `text_only` bundles with clean diagnostics.
+- Its synthetic multi-sender run produced the four expected complete bundles;
+  timeout, edited revision and tombstone scenarios retained audit lineage and
+  left the existing 2 ProductionEvents, 2 Attachments and 99 WorkLogs unchanged.
+- Working migration created two current `text_only` bundles from the two real
+  production-group source messages. Core/cross-reference, source transport,
+  grouping and attachment diagnostics passed; all recorded legacy table
+  signatures and component/WorkBot file hashes remained unchanged.
+- Staged and deployed Windows executables expose file/product version `0.6.5`
+  and passed eight-second smoke tests. Deployment preserved working
+  `config.json`, auth and data; WorkBot polling restarted successfully on
+  schema 2 and connected to MAX API.
+
 ## 2026-08-10 - WorkBot source and setup-state recovery
 
 ### Fixed

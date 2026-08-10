@@ -15,6 +15,7 @@ from production.source_transport_models import (
     SourceRevisionSnapshot,
     SourceRevisionFailure,
     SourceSyncCursor,
+    SourceTombstoneSnapshot,
 )
 from production.source_transport_repository import (
     ProductionSourceTransportRepository,
@@ -42,6 +43,14 @@ class ProductionSourceGateway(Protocol):
         chat_id: int,
         revision_id: int,
     ) -> SourceSyncCursor | None: ...
+
+    def fetch_tombstones(
+        self,
+        chat_id: int,
+        after_tombstone_id: int,
+        *,
+        limit: int,
+    ) -> Sequence[SourceTombstoneSnapshot]: ...
 
 
 class ProductionSourceTransportService:
@@ -100,11 +109,14 @@ class ProductionSourceTransportService:
             return ProductionSourceSyncResult(source_id, error_count=1)
 
         cursor = self._validated_cursor(source, gateway)
+        tombstone_cursor = self.repository.tombstone_cursor(source_id)
         run_id = self.repository.begin_run(source_id, cursor.revision_id)
         result = ProductionSourceSyncResult(
             source_id,
             cursor_before=cursor.revision_id,
             cursor_after=cursor.revision_id,
+            tombstone_cursor_before=tombstone_cursor,
+            tombstone_cursor_after=tombstone_cursor,
         )
         errors: list[str] = []
 
@@ -138,6 +150,13 @@ class ProductionSourceTransportService:
                 )
                 if len(revisions) < max(1, batch_size):
                     break
+            result = self._sync_tombstones(
+                source,
+                gateway,
+                result,
+                errors,
+                batch_size=max(1, batch_size),
+            )
         except Exception as exc:
             errors.append(str(exc))
             result = replace(result, error_count=result.error_count + 1)
@@ -150,6 +169,63 @@ class ProductionSourceTransportService:
             raise
 
         self.repository.finish_run(run_id, result, error_summary="; ".join(errors[:10]))
+        return result
+
+    def _sync_tombstones(
+        self,
+        source: ProductionInboxSource,
+        gateway: ProductionSourceGateway,
+        result: ProductionSourceSyncResult,
+        errors: list[str],
+        *,
+        batch_size: int,
+    ) -> ProductionSourceSyncResult:
+        assert source.id is not None and source.chat_id is not None
+        while True:
+            rows = gateway.fetch_tombstones(
+                source.chat_id,
+                result.tombstone_cursor_after,
+                limit=batch_size,
+            )
+            if not rows:
+                break
+            failed = False
+            for tombstone in sorted(rows, key=lambda item: item.tombstone_id):
+                result = replace(
+                    result,
+                    tombstone_read_count=result.tombstone_read_count + 1,
+                )
+                try:
+                    created = self.repository.import_tombstone(source.id, tombstone)
+                    result = replace(
+                        result,
+                        tombstone_imported_count=(
+                            result.tombstone_imported_count + int(created)
+                        ),
+                        tombstone_unchanged_count=(
+                            result.tombstone_unchanged_count + int(not created)
+                        ),
+                        tombstone_cursor_after=tombstone.tombstone_id,
+                    )
+                    self.repository.advance_tombstone_cursor(
+                        source.id, tombstone.tombstone_id
+                    )
+                except Exception as exc:
+                    errors.append(str(exc))
+                    result = replace(result, error_count=result.error_count + 1)
+                    self.repository.record_issue(
+                        source.id,
+                        0,
+                        tombstone.source_message_id,
+                        0,
+                        "source_tombstone_transport_error",
+                        str(exc),
+                        attachment_id=f"tombstone:{tombstone.tombstone_id}",
+                    )
+                    failed = True
+                    break
+            if failed or len(rows) < batch_size:
+                break
         return result
 
     def diagnostics(self) -> ProductionSourceDiagnosticsReport:

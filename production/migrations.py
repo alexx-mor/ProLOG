@@ -438,6 +438,108 @@ END;
 """
 
 
+PRODUCTION_INBOX_GROUPING_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS ProductionInboxSourceTombstones (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    source_id INTEGER NOT NULL
+        REFERENCES ProductionInboxSources(id) ON DELETE RESTRICT,
+    source_tombstone_id INTEGER NOT NULL CHECK(source_tombstone_id > 0),
+    source_message_id TEXT NOT NULL,
+    chat_id INTEGER NULL,
+    deleted_at_utc TEXT NOT NULL,
+    raw_update_json TEXT NOT NULL,
+    transported_at_utc TEXT NOT NULL,
+    UNIQUE(source_id, source_tombstone_id),
+    UNIQUE(source_id, source_message_id, deleted_at_utc)
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_tombstones_message
+ON ProductionInboxSourceTombstones(source_id, source_message_id, deleted_at_utc);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxTombstoneSyncState (
+    source_id INTEGER PRIMARY KEY
+        REFERENCES ProductionInboxSources(id) ON DELETE RESTRICT,
+    cursor_tombstone_id INTEGER NOT NULL DEFAULT 0 CHECK(cursor_tombstone_id >= 0),
+    last_sync_at_utc TEXT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxBundles (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    source_id INTEGER NOT NULL
+        REFERENCES ProductionInboxSources(id) ON DELETE RESTRICT,
+    chat_id INTEGER NULL,
+    sender_max_user_id INTEGER NULL,
+    sender_display_snapshot TEXT NOT NULL DEFAULT '',
+    started_at_utc TEXT NOT NULL,
+    ended_at_utc TEXT NOT NULL,
+    grouping_status TEXT NOT NULL CHECK(grouping_status IN (
+        'collecting', 'complete', 'needs_description', 'text_only', 'invalid'
+    )),
+    close_reason TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT 'deterministic'
+        CHECK(origin IN ('deterministic', 'manual')),
+    grouping_rule_version TEXT NOT NULL,
+    grouping_window_seconds INTEGER NOT NULL CHECK(grouping_window_seconds > 0),
+    day_boundary_utc_offset_minutes INTEGER NOT NULL
+        CHECK(day_boundary_utc_offset_minutes BETWEEN -840 AND 840),
+    source_fingerprint TEXT NOT NULL UNIQUE CHECK(length(source_fingerprint) = 64),
+    supersedes_bundle_id INTEGER NULL
+        REFERENCES ProductionInboxBundles(id) ON DELETE RESTRICT,
+    is_current INTEGER NOT NULL DEFAULT 1 CHECK(is_current IN (0, 1)),
+    superseded_at_utc TEXT NULL,
+    superseded_reason TEXT NOT NULL DEFAULT '',
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL,
+    CHECK(supersedes_bundle_id IS NULL OR supersedes_bundle_id <> id),
+    CHECK(is_current = 1 OR superseded_at_utc IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_bundles_current
+ON ProductionInboxBundles(source_id, is_current, started_at_utc);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_bundles_sender
+ON ProductionInboxBundles(source_id, chat_id, sender_max_user_id, started_at_utc);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_bundles_lineage
+ON ProductionInboxBundles(supersedes_bundle_id);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxBundleMessages (
+    bundle_id INTEGER NOT NULL
+        REFERENCES ProductionInboxBundles(id) ON DELETE RESTRICT,
+    inbox_message_id INTEGER NOT NULL
+        REFERENCES ProductionInboxMessages(id) ON DELETE RESTRICT,
+    bundle_order INTEGER NOT NULL CHECK(bundle_order >= 0),
+    message_role TEXT NOT NULL CHECK(message_role IN (
+        'photo_source', 'closing_text', 'captioned_media', 'text_only', 'source_only'
+    )),
+    PRIMARY KEY(bundle_id, inbox_message_id),
+    UNIQUE(bundle_id, bundle_order)
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_bundle_messages_message
+ON ProductionInboxBundleMessages(inbox_message_id, bundle_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_tombstones_immutable_update
+BEFORE UPDATE ON ProductionInboxSourceTombstones
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxSourceTombstones snapshot is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_tombstones_immutable_delete
+BEFORE DELETE ON ProductionInboxSourceTombstones
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxSourceTombstones snapshot cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_bundle_messages_immutable_update
+BEFORE UPDATE ON ProductionInboxBundleMessages
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxBundleMessages relation is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_bundle_messages_immutable_delete
+BEFORE DELETE ON ProductionInboxBundleMessages
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxBundleMessages relation cannot be deleted');
+END;
+"""
+
+
 def apply_production_stages_migration(connection: sqlite3.Connection) -> None:
     """Create and seed the standalone production-stage directory."""
 
@@ -486,3 +588,13 @@ def apply_production_source_transport_migration(
     from schema_migrations import execute_sql_script
 
     execute_sql_script(connection, PRODUCTION_SOURCE_TRANSPORT_SCHEMA_SQL)
+
+
+def apply_production_inbox_grouping_migration(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create P9 deterministic grouping and tombstone transport tables."""
+
+    from schema_migrations import execute_sql_script
+
+    execute_sql_script(connection, PRODUCTION_INBOX_GROUPING_SCHEMA_SQL)

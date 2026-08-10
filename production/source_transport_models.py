@@ -120,6 +120,18 @@ class SourceRevisionFailure:
 
 
 @dataclass(frozen=True, slots=True)
+class SourceTombstoneSnapshot:
+    tombstone_id: int
+    source_message_id: str
+    chat_id: int | None
+    deleted_at_utc: datetime
+    raw_update_json: str
+
+    def __post_init__(self) -> None:
+        require_utc_datetime(self.deleted_at_utc, "deleted_at_utc")
+
+
+@dataclass(frozen=True, slots=True)
 class ProductionInboxMessageSnapshot:
     source_id: int
     source_message_id: str
@@ -143,6 +155,11 @@ class ProductionSourceSyncResult:
     error_count: int = 0
     cursor_before: int = 0
     cursor_after: int = 0
+    tombstone_read_count: int = 0
+    tombstone_imported_count: int = 0
+    tombstone_unchanged_count: int = 0
+    tombstone_cursor_before: int = 0
+    tombstone_cursor_after: int = 0
 
 
 class ProductionSourceDiagnosticKind(StrEnum):
