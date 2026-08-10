@@ -9,8 +9,10 @@ from database_registry import (
     OBJECTS_DATABASE,
     PRODUCTS_DATABASE,
     PROLOG_DATABASE,
+    WORKBOT_DATABASE,
     DatabaseRegistry,
 )
+from workbot.storage import WorkBotStorage
 
 
 def test_registry_accepts_existing_prolog_database(tmp_path: Path) -> None:
@@ -47,3 +49,22 @@ def test_registry_rejects_wrong_database_type(tmp_path: Path) -> None:
 
     assert not ok
     assert "не является базой Ядро ProLOG" in message
+
+
+def test_registry_returns_only_available_workbot_database(tmp_path: Path) -> None:
+    workbot_path = tmp_path / "workbot.sqlite3"
+    WorkBotStorage(workbot_path).initialize()
+    registry = DatabaseRegistry(tmp_path / "database_sources.json")
+    registry.add("База WorkBot", WORKBOT_DATABASE, str(workbot_path))
+
+    assert registry.sole_available_path(WORKBOT_DATABASE) == str(workbot_path)
+
+
+def test_registry_does_not_guess_between_workbot_databases(tmp_path: Path) -> None:
+    registry = DatabaseRegistry(tmp_path / "database_sources.json")
+    for index in (1, 2):
+        path = tmp_path / f"workbot-{index}.sqlite3"
+        WorkBotStorage(path).initialize()
+        registry.add(f"WorkBot {index}", WORKBOT_DATABASE, str(path))
+
+    assert registry.sole_available_path(WORKBOT_DATABASE) == ""

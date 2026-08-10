@@ -49,6 +49,7 @@ from ui.worklog_widget import WorkLogWidget
 from ui.workbot_inbox import WorkBotInboxWidget
 
 logger = logging.getLogger(__name__)
+INITIAL_SETUP_SETTING = "app/initial_setup_done"
 
 
 class MainWindow(QMainWindow):
@@ -384,7 +385,16 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _ensure_initial_setup(self) -> None:
+        database_setup_done = (
+            self.directories.ui_setting(INITIAL_SETUP_SETTING, "") == "1"
+        )
         if self.config.initial_setup_done:
+            if not database_setup_done:
+                self.directories.set_ui_setting(INITIAL_SETUP_SETTING, "1")
+            return
+        if database_setup_done:
+            self.config.initial_setup_done = True
+            self.config_manager.save(self.config)
             return
         if not self.auth_session.is_admin:
             self._warn("Первичная настройка доступна только руководителю")
@@ -400,6 +410,7 @@ class MainWindow(QMainWindow):
             dialog.setWindowIcon(icon)
         if dialog.exec():
             self.config.initial_setup_done = True
+            self.directories.set_ui_setting(INITIAL_SETUP_SETTING, "1")
             self._run(lambda: self.config_manager.save(self.config), "Первичная настройка завершена")
             self.refresh_directories()
             self.refresh_employees()

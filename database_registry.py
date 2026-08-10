@@ -152,6 +152,18 @@ class DatabaseRegistry:
     def remove(self, source_id: str) -> None:
         self._save([item for item in self._load() if item.id != source_id])
 
+    def sole_available_path(self, kind: str) -> str:
+        """Return the only available registered database of the requested kind."""
+
+        if kind not in _REQUIRED_TABLES:
+            raise ValueError("Неизвестный тип базы данных")
+        available = [
+            source.path
+            for source in self._load()
+            if source.kind == kind and self.check(source.path, kind)[0]
+        ]
+        return available[0] if len(available) == 1 else ""
+
     def check(self, path: str, kind: str) -> tuple[bool, str]:
         if not path.strip():
             return False, "Путь к базе данных не указан"

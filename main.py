@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from auth import AuthService, AuthSession
 from config import ConfigManager
 from database import Database
+from database_registry import DatabaseRegistry, WORKBOT_DATABASE
 from ui.style import APP_STYLESHEET
 from ui.auth_dialogs import LoginDialog, RegistrationDialog
 from ui.main_window import MainWindow
@@ -45,7 +46,17 @@ def main() -> int:
     app = QApplication(sys.argv)
     app._table_header_installer = install_table_header_support(app)
     app.setStyleSheet(APP_STYLESHEET)
-    settings = ConfigManager().load()
+    config_manager = ConfigManager()
+    settings = config_manager.load()
+    if not settings.workbot_database_path:
+        workbot_path = DatabaseRegistry().sole_available_path(WORKBOT_DATABASE)
+        if workbot_path:
+            settings.workbot_database_path = workbot_path
+            config_manager.save(settings)
+            logging.getLogger(__name__).info(
+                "Restored WorkBot database path from registry: %s",
+                workbot_path,
+            )
     database = Database(
         Path(settings.prolog_database_path) if settings.prolog_database_path else None,
         employees_path=(

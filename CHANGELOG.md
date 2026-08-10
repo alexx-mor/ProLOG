@@ -1,5 +1,26 @@
 ﻿# Changelog
 
+## 2026-08-10 - WorkBot source and setup-state recovery
+
+### Fixed
+
+- Restored the WorkBot parser source automatically when `workbot_database_path`
+  is empty and the database registry contains exactly one available WorkBot DB.
+- Persisted completed initial setup in core `Settings` as well as portable
+  `config.json`, so replacing a distributive default cannot reopen the wizard.
+- Kept ambiguous multi-WorkBot configurations explicit instead of selecting an
+  arbitrary source.
+- Application version advances from `0.6.3` to `0.6.4`; schema versions do not
+  change.
+
+### Verified
+
+- The complete suite passes with `233 passed`.
+- The deployed parser resolves `data/workbot.sqlite3`, reads 1,219 source
+  messages and builds 2,003 current candidates.
+- Staged and deployed executables passed eight-second smoke tests. Deployment
+  preserved the working `config.json` byte-for-byte.
+
 ## 2026-08-10 - Production source transport (P8)
 
 ### Added
