@@ -1,9 +1,9 @@
 # План реализации production-модуля ProLOG
 
-Статус: P0-P7 и эксплуатационный этап P6.1 завершены
+Статус: P0-P8 и эксплуатационный этап P6.1 завершены
 Основание: `ARCHITECTURE_PROPOSAL.md` и ADR-001..ADR-006  
 Версия ProLOG на момент первоначального планирования: 0.5.8
-Текущая реализованная версия: 0.6.2
+Текущая реализованная версия: 0.6.3
 
 ## 1. Границы плана
 
@@ -408,11 +408,13 @@ WorkBot воспроизводит все исходные медиа и рев�
 
 ## 11. Этап P8 — транспорт WorkBot → production inbox
 
+Статус: завершен 10.08.2026. Версия ProLOG 0.6.3, core schema 5.
+
 ### Компоненты
 
-- `integrations/workbot/production_source.py` читает WorkBot только через
+- `integrations/workbot/production_source_gateway.py` читает WorkBot только через
   специализированный адаптер;
-- `ProductionInboxBundles`, `ProductionInboxMessages` и
+- `ProductionInboxSources`, immutable `ProductionInboxMessages` и
   `ProductionInboxAttachments` в `prolog.sqlite3`;
 - копирование неизменяемого снимка источника;
 - content hash и идемпотентность.
@@ -428,6 +430,18 @@ WorkBot воспроизводит все исходные медиа и рев�
 
 Повторная синхронизация не создает дубликаты, а изменение источника помечает
 пакет как измененный.
+
+Результат:
+
+- production MAX chats настраиваются в БД и не зашиты в parser;
+- одна WorkBot revision переносится как одна immutable inbox message;
+- `ProductionInboxBundle` намеренно оставлен до P9;
+- поздняя редакция старого сообщения обнаруживается revision ID watermark;
+- cursor identity защищает от замены или отката WorkBot DB;
+- media переносится как относительный provenance без копирования bytes;
+- неизвестный sender принимается, bot-self отбрасывается transport-слоем;
+- ошибка одной revision/media не блокирует следующие source messages;
+- ProductionEvent, Production Attachment и WorkBotImportRows не создаются.
 
 ## 12. Этап P9 — детерминированная группировка фото и текста
 

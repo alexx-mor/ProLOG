@@ -61,7 +61,7 @@ def test_migration_from_v1_preserves_existing_core_data(tmp_path: Path) -> None:
 
     versions = {item.component: item.current_version for item in database.schema_versions()}
     assert versions == {
-        "prolog": 4,
+        "prolog": 5,
         "employees": 1,
         "objects": 1,
         "products": 1,

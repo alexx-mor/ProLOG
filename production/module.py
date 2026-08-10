@@ -15,6 +15,8 @@ from production.local_attachment_store import LocalAttachmentStore
 from production.projections import ProductionProjectionService
 from production.repository import ProductionStageRepository
 from production.service import ProductionStageService
+from production.source_transport_repository import ProductionSourceTransportRepository
+from production.source_transport_service import ProductionSourceTransportService
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +26,7 @@ class ProductionModule:
     exports: AttachmentExportService
     events: ProductionService
     projections: ProductionProjectionService
+    source_transport: ProductionSourceTransportService
 
 
 def build_production_module(
@@ -38,6 +41,9 @@ def build_production_module(
     stages = ProductionStageRepository(database)
     attachments = AttachmentRepository(database)
     events = ProductionEventRepository(database)
+    source_transport = ProductionSourceTransportService(
+        ProductionSourceTransportRepository(database)
+    )
     projections = ProductionProjectionService(
         events,
         stages,
@@ -64,4 +70,5 @@ def build_production_module(
             projection_service=projections,
         ),
         projections=projections,
+        source_transport=source_transport,
     )

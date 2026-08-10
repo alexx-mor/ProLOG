@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import webbrowser
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QIcon
@@ -22,13 +23,14 @@ from app_modules import (
     role_can_access,
 )
 from auth import AuthService, AuthSession, role_label
-from config import ConfigManager, attachment_root_path
+from config import ConfigManager, attachment_root_path, workbot_media_root_path
 from constants import APP_ICON_FILE, APP_NAME
 from database import Database, DirectoryRepository, EmployeeRepository, WorkLogRepository
 from database_registry import DatabaseRegistry
 from legacy_import.service import LegacyExcelImportService
 from integrations.workbot.repository import WorkBotRepository
 from integrations.workbot.service import WorkBotIntegrationService
+from integrations.workbot.production_source_gateway import WorkBotProductionSourceGateway
 from production.module import build_production_module
 from services import AnalyticsService, DirectoryService, EmployeeService, WorkLogService
 from update_checker import UpdateChecker
@@ -109,6 +111,7 @@ class MainWindow(QMainWindow):
         self.refresh_report_viewer()
         self.refresh_analytics()
         self.workbot_inbox.refresh()
+        self._sync_production_sources()
         self.employee_widget.apply_column_widths(self.config.employee_column_widths)
         self.worklog_widget.apply_column_widths(self.config.worklog_column_widths)
         if self.config.check_updates_on_startup:
@@ -207,6 +210,30 @@ class MainWindow(QMainWindow):
         self.workbot_inbox.imported.connect(self.refresh_worklogs)
         self.workbot_inbox.bindings_changed.connect(self.refresh_employees)
         self.workbot_inbox.status_message.connect(lambda message: self.statusBar().showMessage(message, 10000))
+        self.workbot_inbox.source_synced.connect(self._sync_production_sources)
+
+    def _sync_production_sources(self) -> None:
+        value = self.config.workbot_database_path.strip()
+        if not value:
+            return
+        try:
+            gateway = WorkBotProductionSourceGateway(
+                Path(value),
+                workbot_media_root_path(self.config),
+            )
+            results = self.production_module.source_transport.sync_enabled_sources(gateway)
+        except Exception:
+            logger.exception("Failed to synchronize production source transport")
+            self.statusBar().showMessage("Ошибка синхронизации production-source", 10000)
+            return
+        imported = sum(item.imported_count for item in results)
+        changed = sum(item.changed_count for item in results)
+        errors = sum(item.error_count for item in results)
+        if imported or changed or errors:
+            self.statusBar().showMessage(
+                f"Production-source: новых {imported}, изменений {changed}, ошибок {errors}",
+                10000,
+            )
 
     def refresh_directories(self) -> None:
         active_objects = self.directories.list("objects")

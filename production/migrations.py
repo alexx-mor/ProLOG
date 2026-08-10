@@ -270,6 +270,174 @@ END;
 """
 
 
+PRODUCTION_SOURCE_TRANSPORT_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS ProductionInboxSources (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    source_type TEXT NOT NULL CHECK(TRIM(source_type) <> ''),
+    source_ref TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL CHECK(TRIM(display_name) <> ''),
+    chat_id INTEGER NULL,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    web_url TEXT NOT NULL DEFAULT '',
+    created_at_utc TEXT NOT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_production_inbox_sources_ref
+ON ProductionInboxSources(source_type, source_ref)
+WHERE TRIM(source_ref) <> '';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_production_inbox_sources_max_chat
+ON ProductionInboxSources(chat_id)
+WHERE source_type = 'max_chat' AND chat_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_production_inbox_sources_enabled
+ON ProductionInboxSources(enabled, source_type);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxSyncState (
+    source_id INTEGER PRIMARY KEY
+        REFERENCES ProductionInboxSources(id) ON DELETE RESTRICT,
+    cursor_revision_id INTEGER NOT NULL DEFAULT 0 CHECK(cursor_revision_id >= 0),
+    cursor_message_id TEXT NOT NULL DEFAULT '',
+    cursor_revision_number INTEGER NOT NULL DEFAULT 0 CHECK(cursor_revision_number >= 0),
+    cursor_content_hash TEXT NOT NULL DEFAULT '',
+    last_sync_at_utc TEXT NULL,
+    last_success_at_utc TEXT NULL,
+    updated_at_utc TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxSyncRuns (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    source_id INTEGER NOT NULL
+        REFERENCES ProductionInboxSources(id) ON DELETE RESTRICT,
+    started_at_utc TEXT NOT NULL,
+    completed_at_utc TEXT NULL,
+    cursor_before INTEGER NOT NULL CHECK(cursor_before >= 0),
+    cursor_after INTEGER NOT NULL CHECK(cursor_after >= 0),
+    status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'partial', 'failed')),
+    read_count INTEGER NOT NULL DEFAULT 0 CHECK(read_count >= 0),
+    imported_count INTEGER NOT NULL DEFAULT 0 CHECK(imported_count >= 0),
+    unchanged_count INTEGER NOT NULL DEFAULT 0 CHECK(unchanged_count >= 0),
+    changed_count INTEGER NOT NULL DEFAULT 0 CHECK(changed_count >= 0),
+    skipped_count INTEGER NOT NULL DEFAULT 0 CHECK(skipped_count >= 0),
+    error_count INTEGER NOT NULL DEFAULT 0 CHECK(error_count >= 0),
+    error_summary TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_sync_runs_source
+ON ProductionInboxSyncRuns(source_id, started_at_utc);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxMessages (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    source_id INTEGER NOT NULL
+        REFERENCES ProductionInboxSources(id) ON DELETE RESTRICT,
+    sync_run_id INTEGER NULL
+        REFERENCES ProductionInboxSyncRuns(id) ON DELETE SET NULL,
+    source_type TEXT NOT NULL,
+    source_ref TEXT NOT NULL DEFAULT '',
+    source_message_id TEXT NOT NULL,
+    source_revision_id INTEGER NOT NULL CHECK(source_revision_id > 0),
+    source_revision_number INTEGER NOT NULL CHECK(source_revision_number > 0),
+    chat_id INTEGER NULL,
+    sender_max_user_id INTEGER NULL,
+    sender_display_snapshot TEXT NOT NULL DEFAULT '',
+    message_timestamp_utc TEXT NOT NULL,
+    edited_at_utc TEXT NULL,
+    source_received_at_utc TEXT NOT NULL,
+    transported_at_utc TEXT NOT NULL,
+    source_sequence INTEGER NULL,
+    source_text TEXT NULL,
+    content_hash TEXT NOT NULL CHECK(length(content_hash) = 64),
+    source_content_json TEXT NOT NULL,
+    raw_envelope_json TEXT NOT NULL,
+    change_kind TEXT NOT NULL CHECK(change_kind IN ('original', 'changed')),
+    supersedes_inbox_message_id INTEGER NULL
+        REFERENCES ProductionInboxMessages(id) ON DELETE RESTRICT,
+    UNIQUE(source_id, source_revision_id),
+    UNIQUE(source_id, source_message_id, source_revision_number),
+    CHECK(supersedes_inbox_message_id IS NULL OR supersedes_inbox_message_id <> id)
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_messages_source_order
+ON ProductionInboxMessages(source_id, source_revision_id);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_messages_chat_time
+ON ProductionInboxMessages(chat_id, message_timestamp_utc, source_sequence);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_messages_sender
+ON ProductionInboxMessages(sender_max_user_id, message_timestamp_utc);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_messages_source_message
+ON ProductionInboxMessages(source_id, source_message_id, source_revision_number);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_messages_change
+ON ProductionInboxMessages(source_id, change_kind);
+
+CREATE TABLE IF NOT EXISTS ProductionInboxAttachments (
+    id INTEGER PRIMARY KEY,
+    uid TEXT NOT NULL UNIQUE,
+    inbox_message_id INTEGER NOT NULL
+        REFERENCES ProductionInboxMessages(id) ON DELETE RESTRICT,
+    source_attachment_row_id INTEGER NOT NULL CHECK(source_attachment_row_id > 0),
+    source_attachment_id TEXT NOT NULL,
+    identity_kind TEXT NOT NULL DEFAULT '',
+    source_order INTEGER NOT NULL CHECK(source_order >= 0),
+    attachment_type TEXT NOT NULL,
+    mime_type TEXT NOT NULL DEFAULT '',
+    original_name TEXT NOT NULL DEFAULT '',
+    source_size INTEGER NULL CHECK(source_size IS NULL OR source_size >= 0),
+    source_download_status TEXT NOT NULL,
+    source_sha256 TEXT NOT NULL DEFAULT '',
+    source_storage_key TEXT NOT NULL DEFAULT '',
+    source_downloaded_at_utc TEXT NULL,
+    media_state TEXT NOT NULL
+        CHECK(media_state IN ('available', 'pending', 'failed', 'unavailable', 'missing', 'corrupt', 'unsafe')),
+    source_metadata_json TEXT NOT NULL,
+    UNIQUE(inbox_message_id, source_attachment_id),
+    UNIQUE(inbox_message_id, source_order)
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_attachments_message_order
+ON ProductionInboxAttachments(inbox_message_id, source_order);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_attachments_sha256
+ON ProductionInboxAttachments(source_sha256)
+WHERE source_sha256 <> '';
+
+CREATE TABLE IF NOT EXISTS ProductionInboxSyncIssues (
+    id INTEGER PRIMARY KEY,
+    source_id INTEGER NOT NULL
+        REFERENCES ProductionInboxSources(id) ON DELETE RESTRICT,
+    source_revision_id INTEGER NOT NULL CHECK(source_revision_id >= 0),
+    source_message_id TEXT NOT NULL DEFAULT '',
+    source_revision_number INTEGER NOT NULL DEFAULT 0 CHECK(source_revision_number >= 0),
+    source_attachment_id TEXT NOT NULL DEFAULT '',
+    issue_code TEXT NOT NULL,
+    message TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 1 CHECK(attempts > 0),
+    first_seen_at_utc TEXT NOT NULL,
+    last_seen_at_utc TEXT NOT NULL,
+    resolved_at_utc TEXT NULL,
+    UNIQUE(source_id, source_revision_id, source_attachment_id, issue_code)
+);
+CREATE INDEX IF NOT EXISTS idx_production_inbox_sync_issues_unresolved
+ON ProductionInboxSyncIssues(source_id, resolved_at_utc, source_revision_id);
+
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_messages_immutable_update
+BEFORE UPDATE ON ProductionInboxMessages
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxMessages snapshot is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_messages_immutable_delete
+BEFORE DELETE ON ProductionInboxMessages
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxMessages snapshot cannot be deleted');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_attachments_immutable_update
+BEFORE UPDATE ON ProductionInboxAttachments
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxAttachments snapshot is immutable');
+END;
+CREATE TRIGGER IF NOT EXISTS trg_production_inbox_attachments_immutable_delete
+BEFORE DELETE ON ProductionInboxAttachments
+BEGIN
+    SELECT RAISE(ABORT, 'ProductionInboxAttachments snapshot cannot be deleted');
+END;
+"""
+
+
 def apply_production_stages_migration(connection: sqlite3.Connection) -> None:
     """Create and seed the standalone production-stage directory."""
 
@@ -308,3 +476,13 @@ def apply_production_events_migration(connection: sqlite3.Connection) -> None:
     from schema_migrations import execute_sql_script
 
     execute_sql_script(connection, PRODUCTION_EVENTS_SCHEMA_SQL)
+
+
+def apply_production_source_transport_migration(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create the immutable P8 source transport without logical grouping."""
+
+    from schema_migrations import execute_sql_script
+
+    execute_sql_script(connection, PRODUCTION_SOURCE_TRANSPORT_SCHEMA_SQL)

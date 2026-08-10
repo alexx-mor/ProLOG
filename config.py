@@ -47,3 +47,13 @@ def attachment_root_path(settings: AppSettings) -> Path:
     if settings.attachment_root:
         return Path(settings.attachment_root).expanduser()
     return ATTACHMENTS_DIR
+
+
+def workbot_media_root_path(settings: AppSettings) -> Path:
+    """Resolve WorkBot source media independently from production attachments."""
+
+    if settings.workbot_media_root:
+        return Path(settings.workbot_media_root).expanduser()
+    if settings.workbot_database_path:
+        return Path(settings.workbot_database_path).expanduser().parent / "workbot_media"
+    return ATTACHMENTS_DIR.parent / "workbot_media"

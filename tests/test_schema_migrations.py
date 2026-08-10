@@ -28,7 +28,7 @@ def test_all_component_databases_receive_baseline_version(tmp_path: Path) -> Non
 
     versions = database.schema_versions()
     assert {info.component: info.current_version for info in versions} == {
-        "prolog": 4,
+        "prolog": 5,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -59,7 +59,7 @@ def test_repeated_initialization_does_not_repeat_baseline(tmp_path: Path) -> Non
 
     assert _migration_history(database) == before
     assert {component: len(rows) for component, rows in before.items()} == {
-        "prolog": 4,
+        "prolog": 5,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -109,7 +109,7 @@ def test_current_unversioned_working_database_starts_without_data_changes(
     assert entry is not None
     assert entry.hours == 7.5
     assert {info.component: info.current_version for info in database.schema_versions()} == {
-        "prolog": 4,
+        "prolog": 5,
         "employees": 1,
         "objects": 1,
         "products": 1,
@@ -125,8 +125,8 @@ def test_unknown_newer_schema_version_blocks_startup(tmp_path: Path) -> None:
         connection.execute(
             """
             UPDATE main.SchemaMigrations
-            SET version = 5
-            WHERE component = 'prolog' AND version = 4
+            SET version = 6
+            WHERE component = 'prolog' AND version = 5
             """
         )
 

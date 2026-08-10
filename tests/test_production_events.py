@@ -180,7 +180,7 @@ def _downgrade_core_to_v3(database: Database) -> None:
         connection.execute("DROP TABLE ProductionEventWorkLogs")
         connection.execute("DROP TABLE ProductionEvents")
         connection.execute(
-            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version = 4"
+            "DELETE FROM SchemaMigrations WHERE component = 'prolog' AND version >= 4"
         )
 
 
@@ -196,7 +196,7 @@ def test_migration_v3_to_v4_creates_exact_tables_and_foreign_keys(tmp_path: Path
     database.initialize()
 
     assert {item.component: item.current_version for item in database.schema_versions()} == {
-        "prolog": 4,
+        "prolog": 5,
         "employees": 1,
         "objects": 1,
         "products": 1,

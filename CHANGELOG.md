@@ -1,5 +1,47 @@
 ﻿# Changelog
 
+## 2026-08-10 - Production source transport (P8)
+
+### Added
+
+- Added configurable `max_chat` production sources and registered the verified
+  `Фотоотчеты Электроцех` deployment source outside Python parser code.
+- Added immutable one-to-one WorkBot revision snapshots, ordered media
+  provenance, revision-aware sync cursor, sync runs and structured issues.
+- Added safe cursor identity recovery, per-revision failure isolation and
+  source filtering that accepts unknown senders but excludes bot-self rows.
+
+### Architecture
+
+- Source message and future logical ProductionInboxBundle remain different
+  concepts; P8 performs no grouping, matching, parsing or ProductionEvent work.
+- WorkBot media remains in its movable source root. Core stores only relative
+  provenance and does not create Production Attachment or duplicate bytes.
+- Core advances from schema `4` to `5`; WorkBot remains `2` and component
+  schemas remain `1`. Application version advances `0.6.2` to `0.6.3`.
+
+### Verified
+
+- Added 13 P8 migration/transport/revision/media scenarios; the complete suite
+  passes with `231 passed`.
+- The API chat ID `-77703766302910` was confirmed independently from both the
+  stored WorkBot RAW envelopes and read-only MAX `GET /chats/{chat_id}` data;
+  the returned active chat title is `Фотоотчеты Электроцех`.
+- Working data was backed up before migration to
+  `backups/pre-p8-20260810-140830`, including core/component databases,
+  WorkBot SQLite and the WorkBot media root.
+- The copied-data run at `backups/p8-dry-run-20260810-142000` migrated core to
+  schema 5, transported two real source revisions, then retained four photos
+  and two texts from two senders as six separate inbox snapshots. Integrity and
+  transport diagnostics passed and no logical bundle was created.
+- The working deployment transported the same two real group revisions with no
+  errors. Legacy core signatures, component database bytes, WorkBot database
+  bytes, two existing ProductionEvents, two production Attachments and 3,911
+  WorkBotImportRows remained unchanged.
+- Staged and deployed Windows executables passed eight-second smoke tests and
+  expose file/product version `0.6.3`. The WorkBot polling process was restarted
+  successfully against MAX API on WorkBot schema 2.
+
 ## 2026-08-10 - MAX source revisions and WorkBot media archive (P7)
 
 ### Added

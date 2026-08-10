@@ -53,6 +53,7 @@ from models import (
 from production.migrations import (
     apply_attachments_migration,
     apply_production_events_migration,
+    apply_production_source_transport_migration,
     apply_production_stages_migration,
 )
 from schema_migrations import (
@@ -87,7 +88,7 @@ ALIAS_DEFINITIONS = {
     "product": ("ProductAliases", "product_id", PRODUCTS_TABLE, "name"),
 }
 
-PROLOG_SCHEMA_VERSION = 4
+PROLOG_SCHEMA_VERSION = 5
 PROLOG_SCHEMA_COMPONENTS = (
     MigrationComponent("prolog", "main"),
     MigrationComponent("employees", "employees_db"),
@@ -201,10 +202,16 @@ class Database:
                     apply=self._apply_attachments_migration,
                 ),
                 Migration(
-                    version=PROLOG_SCHEMA_VERSION,
+                    version=4,
                     name="Production event persistence",
                     fingerprint="prolog-production-events-v4",
                     apply=self._apply_production_events_migration,
+                ),
+                Migration(
+                    version=PROLOG_SCHEMA_VERSION,
+                    name="Production source transport",
+                    fingerprint="prolog-production-source-transport-v5",
+                    apply=self._apply_production_source_transport_migration,
                 ),
             ),
             app_version=APP_VERSION,
@@ -255,6 +262,12 @@ class Database:
         connection: sqlite3.Connection,
     ) -> None:
         apply_production_events_migration(connection)
+
+    def _apply_production_source_transport_migration(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        apply_production_source_transport_migration(connection)
 
     def _apply_baseline_migration(self, connection: sqlite3.Connection) -> None:
         execute_sql_script(connection, COMPONENT_SCHEMA_SQL)

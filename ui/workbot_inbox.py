@@ -46,6 +46,7 @@ class WorkBotInboxWidget(QWidget):
     imported = Signal()
     status_message = Signal(str)
     bindings_changed = Signal()
+    source_synced = Signal()
 
     def __init__(self, service: WorkBotIntegrationService, parent=None) -> None:
         super().__init__(parent)
@@ -413,6 +414,7 @@ class WorkBotInboxWidget(QWidget):
             f"WorkBot: добавлено {result.added_rows}, без изменений {result.unchanged_messages}, "
             f"новых версий {result.revised_messages}"
         )
+        self.source_synced.emit()
 
     @Slot(str)
     def _sync_failed(self, message: str) -> None:

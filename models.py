@@ -155,6 +155,7 @@ class AppSettings:
     initial_setup_done: bool = False
     monthly_hours_norm: int = 168
     workbot_database_path: str = ""
+    workbot_media_root: str = ""
     prolog_database_path: str = ""
     employees_database_path: str = ""
     objects_database_path: str = ""
